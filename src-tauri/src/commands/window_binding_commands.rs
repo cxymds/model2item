@@ -8,6 +8,7 @@ use crate::{
     },
     services::{
         iterm_session_service::ItermSessionService, window_binding_service::WindowBindingService,
+        window_binding_sync_service::WindowBindingSyncService,
     },
 };
 
@@ -19,6 +20,11 @@ pub async fn create_window_binding(
     let service = WindowBindingService::new(state.pool.clone());
     let binding = service
         .create_window_binding(input)
+        .await
+        .map_err(|error| error.to_string())?;
+    let sync_service = WindowBindingSyncService::new(state.pool.clone());
+    sync_service
+        .apply_binding(&binding.id)
         .await
         .map_err(|error| error.to_string())?;
     Ok(binding.into())
@@ -45,6 +51,11 @@ pub async fn update_window_binding(
     let service = WindowBindingService::new(state.pool.clone());
     let binding = service
         .update_window_binding(&id, input)
+        .await
+        .map_err(|error| error.to_string())?;
+    let sync_service = WindowBindingSyncService::new(state.pool.clone());
+    sync_service
+        .apply_binding(&binding.id)
         .await
         .map_err(|error| error.to_string())?;
     Ok(binding.into())
@@ -92,7 +103,7 @@ pub async fn refresh_window_binding_presence(
 
     let binding_service = WindowBindingService::new(state.pool.clone());
     let bindings = binding_service
-        .refresh_presence(
+        .sync_with_online_sessions(
             &sessions
                 .iter()
                 .map(|session| session.session_id.clone())

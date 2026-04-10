@@ -1,7 +1,8 @@
 use std::{fs, path::PathBuf};
 
 #[tokio::test]
-async fn creates_database_file_for_path_based_connection() -> Result<(), Box<dyn std::error::Error>> {
+async fn creates_database_file_for_path_based_connection() -> Result<(), Box<dyn std::error::Error>>
+{
     let base_dir = std::env::temp_dir().join(format!("iterm-mcp-tools-{}", uuid::Uuid::new_v4()));
     fs::create_dir_all(&base_dir)?;
 

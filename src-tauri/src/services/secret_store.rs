@@ -63,7 +63,9 @@ impl SecretStore for MemorySecretStore {
             .map_err(|_| AppError::SecretStore("memory secret store lock poisoned".to_string()))?
             .get(locator)
             .cloned()
-            .ok_or_else(|| AppError::MissingDependency(format!("secret not found for locator {locator}")))
+            .ok_or_else(|| {
+                AppError::MissingDependency(format!("secret not found for locator {locator}"))
+            })
     }
 }
 

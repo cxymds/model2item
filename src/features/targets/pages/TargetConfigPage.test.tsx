@@ -98,6 +98,7 @@ describe("TargetConfigPage", () => {
     renderPage();
 
     expect(await screen.findByText("已发现会话")).toBeInTheDocument();
+    expect(screen.getByText("系统会自动清理已关闭且未被运行任务引用的绑定。")).toBeInTheDocument();
     expect(await screen.findByRole("option", { name: /Project A \/ GPT Compare \/ Pane 1/ })).toBeInTheDocument();
     expect(screen.queryByText("Project A")).not.toBeInTheDocument();
     expect(screen.getByText("连接状态：在线")).toBeInTheDocument();

@@ -156,6 +156,7 @@ export function WindowBindingList({
         </button>
       </form>
       {actionError ? <p className="error-text">{actionError}</p> : null}
+      <p className="muted">系统会自动清理已关闭且未被运行任务引用的绑定。</p>
 
       <div className="list-block">
         <h3>当前绑定</h3>

@@ -25,6 +25,14 @@ impl ItermMcpAdapter for FakeAdapter {
         }])
     }
 
+    async fn send_text(&self, _session_id: &str, _text: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn get_screen_text(&self, _session_id: &str) -> Result<String, String> {
+        Ok(String::new())
+    }
+
     async fn execute_prompt(
         &self,
         _request: ItermExecutionRequest,
@@ -39,6 +47,14 @@ struct MissingDependencyAdapter;
 #[async_trait]
 impl ItermMcpAdapter for MissingDependencyAdapter {
     async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
+        Err("Missing Python package 'iterm2'. Install iTerm2 Python API support first.".to_string())
+    }
+
+    async fn send_text(&self, _session_id: &str, _text: &str) -> Result<(), String> {
+        Err("Missing Python package 'iterm2'. Install iTerm2 Python API support first.".to_string())
+    }
+
+    async fn get_screen_text(&self, _session_id: &str) -> Result<String, String> {
         Err("Missing Python package 'iterm2'. Install iTerm2 Python API support first.".to_string())
     }
 

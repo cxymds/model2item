@@ -273,6 +273,39 @@ impl ComparisonRunService {
         Ok(rows)
     }
 
+    pub async fn list_running_target_execution_records(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<ComparisonTargetExecutionRecord>, AppError> {
+        let rows = sqlx::query_as::<_, ComparisonTargetExecutionRecord>(
+            r#"
+            SELECT
+              CAST(json_extract(ct.profile_snapshot_json, '$.position') AS INTEGER) AS position,
+              ct.id AS target_id,
+              ct.run_id AS run_id,
+              ct.window_binding_id AS window_binding_id,
+              wb.iterm_session_id AS iterm_session_id,
+              wb.display_name AS display_name,
+              mp.id AS profile_id,
+              mp.provider AS provider,
+              mp.model_name AS model_name,
+              mp.base_url AS base_url,
+              mp.api_key_encrypted AS api_key_locator,
+              mp.system_prompt AS system_prompt,
+              mp.extra_params_json AS extra_params_json
+            FROM comparison_targets ct
+            JOIN window_bindings wb ON wb.id = ct.window_binding_id
+            JOIN model_profiles mp ON mp.id = wb.profile_id
+            WHERE ct.run_id = ? AND ct.status = 'running'
+            ORDER BY position ASC, ct.id ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     pub async fn mark_run_started(&self, run_id: &str) -> Result<(), AppError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query(
@@ -360,6 +393,39 @@ impl ComparisonRunService {
         .bind(&now)
         .bind(&now)
         .bind(&now)
+        .bind(&now)
+        .bind(response_chars)
+        .bind(response_lines)
+        .bind(target_id)
+        .execute(&self.pool)
+        .await?;
+
+        self.store_target_message(target_id, "assistant", output_text, "response")
+            .await
+    }
+
+    pub async fn record_target_interactive_output(
+        &self,
+        target_id: &str,
+        output_text: &str,
+    ) -> Result<(), AppError> {
+        let now = Utc::now().to_rfc3339();
+        let response_chars = output_text.chars().count() as i64;
+        let response_lines = output_text.lines().count() as i64;
+
+        sqlx::query(
+            r#"
+            UPDATE comparison_targets
+            SET
+              first_response_at = COALESCE(first_response_at, ?),
+              response_chars = ?,
+              response_lines = ?,
+              success_status = 'streaming',
+              error_category = NULL,
+              error_detail = NULL
+            WHERE id = ?
+            "#,
+        )
         .bind(&now)
         .bind(response_chars)
         .bind(response_lines)

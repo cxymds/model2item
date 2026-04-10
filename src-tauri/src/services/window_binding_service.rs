@@ -104,28 +104,57 @@ impl WindowBindingService {
         Ok(())
     }
 
-    pub async fn refresh_presence(
+    pub async fn sync_with_online_sessions(
         &self,
         online_session_ids: &[String],
     ) -> Result<Vec<WindowBindingRecord>, AppError> {
         let now = Utc::now().to_rfc3339();
+        let bindings = self.list_window_bindings().await?;
+        let online_session_ids = online_session_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
         let mut tx = self.pool.begin().await?;
 
-        for session_id in online_session_ids {
-            sqlx::query(
-                r#"
-                UPDATE window_bindings
-                SET last_seen_at = ?
-                WHERE iterm_session_id = ?
-                "#,
+        for binding in &bindings {
+            if online_session_ids.contains(&binding.iterm_session_id) {
+                sqlx::query(
+                    r#"
+                    UPDATE window_bindings
+                    SET last_seen_at = ?
+                    WHERE id = ?
+                    "#,
+                )
+                .bind(&now)
+                .bind(&binding.id)
+                .execute(&mut *tx)
+                .await?;
+                continue;
+            }
+
+            let reference_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(1) FROM comparison_targets WHERE window_binding_id = ?",
             )
-            .bind(&now)
-            .bind(session_id)
-            .execute(&mut *tx)
+            .bind(&binding.id)
+            .fetch_one(&mut *tx)
             .await?;
+
+            if reference_count == 0 {
+                sqlx::query("DELETE FROM window_bindings WHERE id = ?")
+                    .bind(&binding.id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
 
         tx.commit().await?;
         self.list_window_bindings().await
+    }
+
+    pub async fn refresh_presence(
+        &self,
+        online_session_ids: &[String],
+    ) -> Result<Vec<WindowBindingRecord>, AppError> {
+        self.sync_with_online_sessions(online_session_ids).await
     }
 }

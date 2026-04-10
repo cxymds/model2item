@@ -17,14 +17,14 @@ describe("AppShell", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("运行任务")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "新建任务" })).toHaveAttribute("href", "/runs/new");
     expect(screen.getByText("历史运行")).toBeInTheDocument();
     expect(screen.getByText("案例库")).toBeInTheDocument();
     expect(screen.getByText("目标配置")).toBeInTheDocument();
     expect(screen.getByText("设置")).toBeInTheDocument();
   });
 
-  it("renders a shortcut back to the most recent active run", () => {
+  it("renders the current active run entry instead of the new run entry", () => {
     saveRecentRun({
       id: "run-1",
       title: "Legacy parser benchmark",
@@ -39,7 +39,9 @@ describe("AppShell", () => {
       </MemoryRouter>,
     );
 
-    const recentRunLink = screen.getByRole("link", { name: "返回运行中任务" });
+    expect(screen.queryByRole("link", { name: "新建任务" })).not.toBeInTheDocument();
+
+    const recentRunLink = screen.getByRole("link", { name: "当前进行中的任务" });
     expect(recentRunLink).toHaveAttribute("href", "/runs/run-1");
     expect(recentRunLink).toHaveTextContent("Legacy parser benchmark");
   });
@@ -53,7 +55,7 @@ describe("AppShell", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.queryByRole("link", { name: "返回运行中任务" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "新建任务" })).toHaveAttribute("href", "/runs/new");
 
     act(() => {
       saveRecentRun({
@@ -63,7 +65,9 @@ describe("AppShell", () => {
       });
     });
 
-    const recentRunLink = screen.getByRole("link", { name: "返回运行中任务" });
+    expect(screen.queryByRole("link", { name: "新建任务" })).not.toBeInTheDocument();
+
+    const recentRunLink = screen.getByRole("link", { name: "当前进行中的任务" });
     expect(recentRunLink).toHaveAttribute("href", "/runs/run-2");
     expect(recentRunLink).toHaveTextContent("Session switch benchmark");
   });

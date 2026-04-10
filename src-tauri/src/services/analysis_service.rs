@@ -34,7 +34,8 @@ pub fn build_comparison_summary(
                 queued_count += 1;
             }
             if let Some(duration) = target.duration_ms {
-                if fastest_duration.is_none() || fastest_duration.is_some_and(|current| duration < current)
+                if fastest_duration.is_none()
+                    || fastest_duration.is_some_and(|current| duration < current)
                 {
                     fastest_duration = Some(duration);
                     fastest_target_id = Some(target.id.clone());
@@ -45,7 +46,8 @@ pub fn build_comparison_summary(
                 longest_target_id = Some(target.id.clone());
             }
 
-            let parsed = serde_json::from_str::<ProfileSnapshot>(&target.profile_snapshot_json).ok();
+            let parsed =
+                serde_json::from_str::<ProfileSnapshot>(&target.profile_snapshot_json).ok();
             let display_name = parsed.as_ref().and_then(|item| item.display_name.clone());
             let provider = parsed.as_ref().and_then(|item| item.provider.clone());
             let model_name = parsed.as_ref().and_then(|item| item.model_name.clone());
@@ -77,12 +79,8 @@ pub fn build_comparison_summary(
     } else {
         format!(
             "fastest={}; longest={}; queued={}",
-            fastest_target_id
-                .as_deref()
-                .unwrap_or("n/a"),
-            longest_target_id
-                .as_deref()
-                .unwrap_or("n/a"),
+            fastest_target_id.as_deref().unwrap_or("n/a"),
+            longest_target_id.as_deref().unwrap_or("n/a"),
             queued_count
         )
     };

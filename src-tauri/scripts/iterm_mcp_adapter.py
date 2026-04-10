@@ -40,6 +40,23 @@ async def main(connection: "iterm2.Connection") -> None:
         json.dump({"sessions": sessions}, sys.stdout)
         return
 
+    if action == "send_text":
+        session = app.get_session_by_id(PAYLOAD["session_id"])
+        if session is None:
+            raise RuntimeError(f"iTerm2 session not found: {PAYLOAD['session_id']}")
+
+        await session.async_send_text(PAYLOAD["text"])
+        json.dump({"output_text": ""}, sys.stdout)
+        return
+
+    if action == "get_screen_text":
+        session = app.get_session_by_id(PAYLOAD["session_id"])
+        if session is None:
+            raise RuntimeError(f"iTerm2 session not found: {PAYLOAD['session_id']}")
+
+        json.dump({"output_text": await capture_screen_text(session)}, sys.stdout)
+        return
+
     if action != "execute_prompt":
         raise RuntimeError(f"Unsupported action: {action}")
 
@@ -69,6 +86,15 @@ async def main(connection: "iterm2.Connection") -> None:
         raise RuntimeError(failure_message)
 
     json.dump({"output_text": output_text}, sys.stdout)
+
+
+async def capture_screen_text(session: "iterm2.Session") -> str:
+    if not hasattr(session, "async_get_screen_contents"):
+        return ""
+
+    screen = await session.async_get_screen_contents()
+    lines = [line.string for line in getattr(screen, "screen_contents", [])]
+    return "\n".join(line.rstrip() for line in lines if line is not None).strip()
 
 
 async def wait_for_status_file(status_path: Path, timeout_seconds: float = 600.0) -> None:

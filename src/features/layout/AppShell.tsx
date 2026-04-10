@@ -3,7 +3,6 @@ import { NavLink } from "react-router-dom";
 import { getRecentRunHref, getRecentRunLabel, useRecentRun } from "../runs/lib/recentRun";
 
 const navItems = [
-  { to: "/runs/new", label: "运行任务" },
   { to: "/runs/history", label: "历史运行" },
   { to: "/cases", label: "案例库" },
   { to: "/targets", label: "目标配置" },
@@ -12,6 +11,17 @@ const navItems = [
 
 export function AppShell({ children }: PropsWithChildren) {
   const recentRun = useRecentRun();
+  const runEntry =
+    recentRun && (recentRun.status === "queued" || recentRun.status === "running")
+      ? {
+          to: getRecentRunHref(recentRun),
+          label: getRecentRunLabel(recentRun.status),
+          title: recentRun.title,
+        }
+      : {
+          to: "/runs/new",
+          label: "新建任务",
+        };
 
   return (
     <div className="app-shell">
@@ -21,6 +31,19 @@ export function AppShell({ children }: PropsWithChildren) {
           <h1>iTerm MCP 工具</h1>
         </div>
         <nav className="nav-list">
+          <NavLink
+            aria-label={runEntry.label}
+            to={runEntry.to}
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
+            {runEntry.label}
+            {"title" in runEntry ? (
+              <>
+                <br />
+                {runEntry.title}
+              </>
+            ) : null}
+          </NavLink>
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -30,17 +53,6 @@ export function AppShell({ children }: PropsWithChildren) {
               {item.label}
             </NavLink>
           ))}
-          {recentRun ? (
-            <NavLink
-              aria-label={getRecentRunLabel(recentRun.status)}
-              to={getRecentRunHref(recentRun)}
-              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
-            >
-              {getRecentRunLabel(recentRun.status)}
-              <br />
-              {recentRun.title}
-            </NavLink>
-          ) : null}
         </nav>
       </aside>
       <main className="content">{children}</main>

@@ -48,6 +48,8 @@ pub fn classify_adapter_error(error: String) -> AppError {
 #[async_trait]
 pub trait ItermMcpAdapter: Send + Sync + Clone + 'static {
     async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String>;
+    async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String>;
+    async fn get_screen_text(&self, session_id: &str) -> Result<String, String>;
 
     async fn execute_prompt(
         &self,
@@ -123,11 +125,43 @@ impl ItermMcpAdapter for PythonItermMcpAdapter {
             .ok_or_else(|| "adapter response did not include sessions".to_string())
     }
 
+    async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String> {
+        self.run_script(
+            serde_json::to_vec(&serde_json::json!({
+                "action": "send_text",
+                "session_id": session_id,
+                "text": text,
+            }))
+            .map_err(|error| error.to_string())?,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn get_screen_text(&self, session_id: &str) -> Result<String, String> {
+        let response = self
+            .run_script(
+                serde_json::to_vec(&serde_json::json!({
+                    "action": "get_screen_text",
+                    "session_id": session_id,
+                }))
+                .map_err(|error| error.to_string())?,
+            )
+            .await?;
+
+        response
+            .output_text
+            .ok_or_else(|| "adapter response did not include output_text".to_string())
+    }
+
     async fn execute_prompt(
         &self,
         request: ItermExecutionRequest,
     ) -> Result<ItermExecutionResult, String> {
         let built_command = build_claude_command(&request)?;
+        self.send_text(&request.session_id, &built_command.command_text)
+            .await?;
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         let response = self
             .run_script(
                 serde_json::to_vec(&ScriptRequest {
@@ -221,6 +255,104 @@ fn build_claude_command(request: &ItermExecutionRequest) -> Result<BuiltCommand,
         error_path,
         status_path,
     })
+}
+
+pub fn build_binding_sync_command(
+    profile_name: &str,
+    provider: &str,
+    model_name: &str,
+    base_url: &str,
+    api_key: &str,
+) -> String {
+    let mut commands = Vec::new();
+    if !api_key.trim().is_empty() {
+        commands.push(format!(
+            "export ANTHROPIC_API_KEY={}",
+            shell_escape(api_key)
+        ));
+        commands.push(format!(
+            "export ANTHROPIC_AUTH_TOKEN={}",
+            shell_escape(api_key)
+        ));
+    }
+    if !base_url.trim().is_empty() {
+        commands.push(format!(
+            "export ANTHROPIC_BASE_URL={}",
+            shell_escape(base_url)
+        ));
+    }
+    if !model_name.trim().is_empty() {
+        commands.push(format!(
+            "export ANTHROPIC_MODEL={}",
+            shell_escape(model_name)
+        ));
+    }
+    commands.push(format!(
+        "printf '%s\\n' {}",
+        shell_escape(&format!(
+            "[iterm-mcp-tools] Bound profile '{profile_name}' ({provider}/{model_name}) to this window. Next run will use {model_name} via Claude Code."
+        ))
+    ));
+
+    format!("{}\n", commands.join(" && "))
+}
+
+pub fn build_interactive_claude_launch_command(
+    request: &ItermExecutionRequest,
+) -> Result<String, String> {
+    let extras = parse_claude_cli_extras(&request.extra_params_json)?;
+    let mut commands = Vec::new();
+
+    if !request.api_key.trim().is_empty() {
+        commands.push(format!(
+            "export ANTHROPIC_API_KEY={}",
+            shell_escape(&request.api_key)
+        ));
+        commands.push(format!(
+            "export ANTHROPIC_AUTH_TOKEN={}",
+            shell_escape(&request.api_key)
+        ));
+    }
+    if !request.base_url.trim().is_empty() {
+        commands.push(format!(
+            "export ANTHROPIC_BASE_URL={}",
+            shell_escape(&request.base_url)
+        ));
+    }
+    if !request.model_name.trim().is_empty() {
+        commands.push(format!(
+            "export ANTHROPIC_MODEL={}",
+            shell_escape(&request.model_name)
+        ));
+    }
+    for (key, value) in extras.env {
+        commands.push(format!("export {key}={}", shell_escape(&value)));
+    }
+    if let Some(cwd) = extras.cwd {
+        commands.push(format!("cd {}", shell_escape(&cwd)));
+    }
+    commands.push(format!(
+        "printf '%s\\n' {}",
+        shell_escape(&format!(
+            "[iterm-mcp-tools] Starting interactive Claude session for {} ({}/{})",
+            request.request_id, request.provider, request.model_name
+        ))
+    ));
+
+    let claude_executable = extras
+        .claude_executable
+        .unwrap_or_else(|| "claude".to_string());
+    let mut invocation_parts = vec![
+        shell_escape(&claude_executable),
+        "--model".to_string(),
+        shell_escape(&request.model_name),
+    ];
+    for arg in extras.args {
+        invocation_parts.push(shell_escape(&arg));
+    }
+    commands.push(invocation_parts.join(" "));
+
+    Ok(format!("{}\n", commands.join(" && ")))
 }
 
 fn parse_claude_cli_extras(raw: &str) -> Result<ClaudeCliExtras, String> {

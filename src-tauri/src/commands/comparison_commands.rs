@@ -96,3 +96,16 @@ pub async fn start_comparison_run(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn send_comparison_run_message(
+    state: State<'_, AppState>,
+    run_id: String,
+    prompt: String,
+) -> Result<(), String> {
+    let orchestrator = ComparisonOrchestrator::new(state.pool.clone());
+    orchestrator
+        .broadcast_message(&run_id, &prompt)
+        .await
+        .map_err(|error| error.to_string())
+}

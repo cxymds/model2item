@@ -75,6 +75,10 @@ export function startComparisonRun(runId: string) {
   return core.invoke<void>("start_comparison_run", { runId });
 }
 
+export function sendComparisonRunMessage(runId: string, prompt: string) {
+  return core.invoke<void>("send_comparison_run_message", { runId, prompt });
+}
+
 export function getComparisonRun(runId: string) {
   return core.invoke<ComparisonRunResponse>("get_comparison_run", { runId });
 }

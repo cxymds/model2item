@@ -33,7 +33,10 @@ async fn creates_core_tables() -> Result<(), Box<dyn std::error::Error>> {
             "expected table `{table}` to exist"
         );
     }
-    assert!(foreign_keys_on, "expected SQLite foreign_keys pragma to be ON");
+    assert!(
+        foreign_keys_on,
+        "expected SQLite foreign_keys pragma to be ON"
+    );
 
     Ok(())
 }
@@ -73,7 +76,9 @@ async fn creates_and_lists_profiles() -> Result<(), Box<dyn std::error::Error>> 
     assert_eq!(stored_locator, created.api_key_encrypted);
     assert_ne!(stored_locator, secret);
     assert_eq!(
-        secret_store.get_secret(&profile_secret_locator(&created.id)).as_deref(),
+        secret_store
+            .get_secret(&profile_secret_locator(&created.id))
+            .as_deref(),
         Some(secret)
     );
 

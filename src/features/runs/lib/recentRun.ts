@@ -68,7 +68,7 @@ export function useRecentRun() {
 }
 
 export function getRecentRunLabel(status: string) {
-  if (status === "queued" || status === "running") return "返回运行中任务";
+  if (status === "queued" || status === "running") return "当前进行中的任务";
   return "查看最近运行结果";
 }
 

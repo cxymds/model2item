@@ -1,15 +1,16 @@
 mod support;
 
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use async_trait::async_trait;
 use iterm_mcp_tools_lib::{
     error::AppError,
     models::{
-        comparison_run::CreateComparisonRunInput,
-        evaluation_case::CreateEvaluationCaseInput,
-        profile::CreateProfileInput,
-        window_binding::CreateWindowBindingInput,
+        comparison_run::CreateComparisonRunInput, evaluation_case::CreateEvaluationCaseInput,
+        profile::CreateProfileInput, window_binding::CreateWindowBindingInput,
     },
     services::{
         comparison_orchestrator::ComparisonOrchestrator,
@@ -24,8 +25,11 @@ use iterm_mcp_tools_lib::{
     },
 };
 
-#[derive(Clone)]
-struct FakeAdapter;
+#[derive(Clone, Default)]
+struct FakeAdapter {
+    sent_texts: Arc<Mutex<Vec<(String, String)>>>,
+    screens: Arc<Mutex<HashMap<String, String>>>,
+}
 
 #[async_trait]
 impl ItermMcpAdapter for FakeAdapter {
@@ -50,14 +54,35 @@ impl ItermMcpAdapter for FakeAdapter {
         ])
     }
 
+    async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String> {
+        if session_id == "session-fail" {
+            return Err("simulated adapter failure".to_string());
+        }
+
+        self.sent_texts
+            .lock()
+            .expect("sent_texts mutex")
+            .push((session_id.to_string(), text.to_string()));
+        let mut screens = self.screens.lock().expect("screens mutex");
+        let current = screens.entry(session_id.to_string()).or_default();
+        current.push_str(text);
+        Ok(())
+    }
+
+    async fn get_screen_text(&self, session_id: &str) -> Result<String, String> {
+        Ok(self
+            .screens
+            .lock()
+            .expect("screens mutex")
+            .get(session_id)
+            .cloned()
+            .unwrap_or_default())
+    }
+
     async fn execute_prompt(
         &self,
         request: ItermExecutionRequest,
     ) -> Result<ItermExecutionResult, String> {
-        if request.session_id == "session-fail" {
-            return Err("simulated adapter failure".to_string());
-        }
-
         Ok(ItermExecutionResult {
             output_text: format!(
                 "session={} provider={} model={}",
@@ -75,8 +100,12 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
     let case_service = EvaluationCaseService::new(pool.clone());
     let binding_service = WindowBindingService::new(pool.clone());
     let run_service = ComparisonRunService::new(pool.clone());
-    let orchestrator =
-        ComparisonOrchestrator::with_dependencies(pool.clone(), secret_store.clone(), FakeAdapter);
+    let adapter = FakeAdapter::default();
+    let orchestrator = ComparisonOrchestrator::with_dependencies(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+    );
 
     let success_profile = profile_service
         .create_profile(CreateProfileInput {
@@ -144,12 +173,12 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
         .iter()
         .find(|target| target.window_binding_id == success_binding.id)
         .expect("success target should exist");
-    assert_eq!(success_target.status, "done");
-    assert_eq!(success_target.success_status.as_deref(), Some("completed"));
+    assert_eq!(success_target.status, "running");
+    assert_eq!(success_target.success_status.as_deref(), Some("streaming"));
     assert!(success_target.sent_at.is_some());
     assert!(success_target.first_response_at.is_some());
-    assert!(success_target.finished_at.is_some());
-    assert!(success_target.duration_ms.is_some());
+    assert!(success_target.finished_at.is_none());
+    assert_eq!(success_target.duration_ms, None);
     assert!(success_target.response_chars > 0);
     assert!(success_target.response_lines > 0);
     assert_eq!(success_target.error_category, None);
@@ -168,16 +197,99 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
     assert!(fail_target.finished_at.is_some());
     assert_eq!(fail_target.success_status.as_deref(), Some("failed"));
 
-    let stored_messages = sqlx::query_scalar::<_, String>(
-        "SELECT content FROM messages ORDER BY created_at ASC",
-    )
-    .fetch_all(&pool)
-    .await?;
+    let sent_texts = adapter.sent_texts.lock().expect("sent_texts mutex");
+    assert!(sent_texts.iter().any(|(session_id, text)| {
+        session_id == "session-ok" && text.contains("Starting interactive Claude session")
+    }));
+    assert!(sent_texts.iter().any(|(session_id, text)| {
+        session_id == "session-ok" && text.contains("Summarize the core control flow")
+    }));
+
+    let stored_messages =
+        sqlx::query_scalar::<_, String>("SELECT content FROM messages ORDER BY created_at ASC")
+            .fetch_all(&pool)
+            .await?;
     assert_eq!(stored_messages.len(), 4);
     let combined_messages = stored_messages.join("\n---\n");
     assert!(combined_messages.contains("Summarize the core control flow"));
-    assert!(combined_messages.contains("session=session-ok"));
+    assert!(combined_messages.contains("Starting interactive Claude session"));
     assert!(combined_messages.contains("simulated adapter failure"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn broadcasts_follow_up_input_into_running_target_sessions(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = FakeAdapter::default();
+    let orchestrator = ComparisonOrchestrator::with_dependencies(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude".to_string(),
+            provider: "anthropic".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Old code understanding".to_string(),
+            prompt: "Summarize the core control flow".to_string(),
+            context_payload: "{\"files\":[\"legacy/service.rb\"]}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-ok".to_string(),
+            display_name: "Window A".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Legacy compare".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.execute_run(&run.id).await?;
+    orchestrator
+        .broadcast_message(&run.id, "Continue with parser edge cases")
+        .await?;
+
+    let sent_texts = adapter.sent_texts.lock().expect("sent_texts mutex");
+    let follow_up_count = sent_texts
+        .iter()
+        .filter(|(session_id, text)| {
+            session_id == "session-ok" && text.contains("Continue with parser edge cases")
+        })
+        .count();
+    assert_eq!(follow_up_count, 1);
+
+    let stored_messages =
+        sqlx::query_scalar::<_, String>("SELECT content FROM messages ORDER BY created_at ASC")
+            .fetch_all(&pool)
+            .await?;
+    let combined_messages = stored_messages.join("\n---\n");
+    assert!(combined_messages.contains("Continue with parser edge cases"));
 
     Ok(())
 }
@@ -190,8 +302,11 @@ async fn rejects_run_when_target_session_is_offline() -> Result<(), Box<dyn std:
     let case_service = EvaluationCaseService::new(pool.clone());
     let binding_service = WindowBindingService::new(pool.clone());
     let run_service = ComparisonRunService::new(pool.clone());
-    let orchestrator =
-        ComparisonOrchestrator::with_dependencies(pool.clone(), secret_store.clone(), FakeAdapter);
+    let orchestrator = ComparisonOrchestrator::with_dependencies(
+        pool.clone(),
+        secret_store.clone(),
+        FakeAdapter::default(),
+    );
 
     let profile = profile_service
         .create_profile(CreateProfileInput {

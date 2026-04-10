@@ -8,9 +8,39 @@ pub mod services;
 use app_state::AppState;
 use std::{fs, path::PathBuf};
 use tauri::Manager;
+use tokio::time::{sleep, Duration};
+
+use crate::services::{
+    iterm_session_service::ItermSessionService, window_binding_service::WindowBindingService,
+};
 
 fn workbench_database_path(base_dir: PathBuf) -> PathBuf {
     base_dir.join("workbench.db")
+}
+
+fn spawn_window_binding_sync_task(pool: sqlx::SqlitePool) {
+    tauri::async_runtime::spawn(async move {
+        let session_service = ItermSessionService::new();
+        let binding_service = WindowBindingService::new(pool);
+
+        loop {
+            match session_service.list_sessions().await {
+                Ok(sessions) => {
+                    let _ = binding_service
+                        .sync_with_online_sessions(
+                            &sessions
+                                .iter()
+                                .map(|session| session.session_id.clone())
+                                .collect::<Vec<_>>(),
+                        )
+                        .await;
+                }
+                Err(_) => {}
+            }
+
+            sleep(Duration::from_secs(15)).await;
+        }
+    });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -30,6 +60,7 @@ pub fn run() {
                     .expect("failed to initialize database")
             });
 
+            spawn_window_binding_sync_task(pool.clone());
             app.manage(AppState { pool });
             Ok(())
         })
@@ -48,6 +79,7 @@ pub fn run() {
             commands::evaluation_case_commands::delete_evaluation_case,
             commands::comparison_commands::create_comparison_run,
             commands::comparison_commands::start_comparison_run,
+            commands::comparison_commands::send_comparison_run_message,
             commands::comparison_commands::get_comparison_run,
             commands::comparison_commands::list_comparison_runs,
             commands::comparison_commands::list_comparison_targets,

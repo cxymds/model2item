@@ -7,3 +7,4 @@ pub mod iterm_session_service;
 pub mod profile_service;
 pub mod secret_store;
 pub mod window_binding_service;
+pub mod window_binding_sync_service;
