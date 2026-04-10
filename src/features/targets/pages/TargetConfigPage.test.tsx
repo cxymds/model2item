@@ -71,12 +71,12 @@ function renderPage() {
 }
 
 describe("TargetConfigPage", () => {
-  it("renders discovered iTerm sessions in the binding form", async () => {
+  it("shows discovered iTerm sessions only in the binding form selector", async () => {
     renderPage();
 
-    expect((await screen.findAllByText("已发现会话")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("已发现会话")).toBeInTheDocument();
     expect(await screen.findByRole("option", { name: /Project A \/ GPT Compare \/ Pane 1/ })).toBeInTheDocument();
-    expect(screen.getByText("Project A")).toBeInTheDocument();
+    expect(screen.queryByText("Project A")).not.toBeInTheDocument();
     expect(screen.getByText("连接状态：在线")).toBeInTheDocument();
     expect(screen.getByText("连接状态：离线")).toBeInTheDocument();
   });

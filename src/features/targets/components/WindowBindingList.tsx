@@ -140,24 +140,6 @@ export function WindowBindingList({
       </form>
 
       <div className="list-block">
-        <h3>已发现会话</h3>
-        {sessionOptions.length === 0 ? (
-          <p className="muted">尚未发现 iTerm2 会话，请打开 iTerm2 后刷新。</p>
-        ) : (
-          <ul className="card-list">
-            {sessionOptions.map((session) => (
-              <li className="data-card" key={session.session_id}>
-                <strong>{session.window_title}</strong>
-                <span>{session.tab_title}</span>
-                <span>{session.session_title}</span>
-                <span>会话：{session.session_id}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="list-block">
         <h3>当前绑定</h3>
         {bindings.length === 0 ? (
           <p className="muted">还没有绑定，请先在上方创建。</p>
