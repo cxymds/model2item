@@ -1,3 +1,4 @@
+use chrono::Utc;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
@@ -55,5 +56,30 @@ impl WindowBindingService {
         .fetch_one(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    pub async fn refresh_presence(
+        &self,
+        online_session_ids: &[String],
+    ) -> Result<Vec<WindowBindingRecord>, AppError> {
+        let now = Utc::now().to_rfc3339();
+        let mut tx = self.pool.begin().await?;
+
+        for session_id in online_session_ids {
+            sqlx::query(
+                r#"
+                UPDATE window_bindings
+                SET last_seen_at = ?
+                WHERE iterm_session_id = ?
+                "#,
+            )
+            .bind(&now)
+            .bind(session_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        self.list_window_bindings().await
     }
 }

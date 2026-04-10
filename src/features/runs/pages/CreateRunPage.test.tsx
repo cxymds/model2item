@@ -1,8 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { vi } from "vitest";
 import { CreateRunPage } from "./CreateRunPage";
+
+const { refreshWindowBindingPresence } = vi.hoisted(() => {
+  return {
+    refreshWindowBindingPresence: vi.fn().mockResolvedValue([]),
+  };
+});
 
 vi.mock("../../../lib/tauri", () => {
   return {
@@ -49,6 +55,7 @@ vi.mock("../../../lib/tauri", () => {
         session_title: "Pane 1",
       },
     ]),
+    refreshWindowBindingPresence,
     createComparisonRun: vi.fn().mockResolvedValue({
       id: "run-1",
       evaluation_case_id: "case-1",
@@ -82,6 +89,10 @@ function renderPage() {
 }
 
 describe("CreateRunPage", () => {
+  beforeEach(() => {
+    refreshWindowBindingPresence.mockClear();
+  });
+
   it("renders online bindings and disables offline ones", async () => {
     renderPage();
 
@@ -94,5 +105,16 @@ describe("CreateRunPage", () => {
     expect(offlineOption).toBeDisabled();
     expect(screen.getByText(/离线窗口会被禁用/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "开始运行" })).toBeInTheDocument();
+  });
+
+  it("refreshes window presence from the create page", async () => {
+    renderPage();
+
+    const refreshButton = await screen.findByRole("button", { name: "刷新窗口状态" });
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => {
+      expect(refreshWindowBindingPresence).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -54,6 +54,8 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             )));
         }
 
+        self.ensure_targets_online(&targets).await?;
+
         self.run_service.mark_run_started(run_id).await?;
 
         let mut failed_count = 0usize;
@@ -65,6 +67,35 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
 
         let final_status = if failed_count > 0 { "failed" } else { "done" };
         self.run_service.finalize_run(run_id, final_status).await
+    }
+
+    async fn ensure_targets_online(
+        &self,
+        targets: &[ComparisonTargetExecutionRecord],
+    ) -> Result<(), AppError> {
+        let online_session_ids = self
+            .adapter
+            .list_sessions()
+            .await
+            .map_err(AppError::Adapter)?
+            .into_iter()
+            .map(|session| session.session_id)
+            .collect::<std::collections::HashSet<_>>();
+
+        let offline_targets = targets
+            .iter()
+            .filter(|target| !online_session_ids.contains(&target.iterm_session_id))
+            .map(|target| format!("{} ({})", target.display_name, target.iterm_session_id))
+            .collect::<Vec<_>>();
+
+        if offline_targets.is_empty() {
+            Ok(())
+        } else {
+            Err(AppError::InvalidInput(format!(
+                "cannot start comparison run because these target windows are offline: {}",
+                offline_targets.join(", ")
+            )))
+        }
     }
 
     async fn execute_target(

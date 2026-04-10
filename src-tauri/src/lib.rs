@@ -22,6 +22,7 @@ pub fn run() {
                 commands::window_binding_commands::create_window_binding,
                 commands::window_binding_commands::list_window_bindings,
                 commands::window_binding_commands::list_iterm_sessions,
+                commands::window_binding_commands::refresh_window_binding_presence,
                 commands::evaluation_case_commands::create_evaluation_case,
                 commands::evaluation_case_commands::list_evaluation_cases,
                 commands::comparison_commands::create_comparison_run,

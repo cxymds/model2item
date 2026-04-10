@@ -61,3 +61,54 @@ async fn rejects_window_binding_when_profile_does_not_exist() -> Result<(), Box<
 
     Ok(())
 }
+
+#[tokio::test]
+async fn syncs_last_seen_for_online_window_bindings() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let profile_service = ProfileService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool);
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude Sonnet".to_string(),
+            provider: "anthropic".to_string(),
+            model_name: "claude-sonnet".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let online_binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-online".to_string(),
+            display_name: "Window Online".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let offline_binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-offline".to_string(),
+            display_name: "Window Offline".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let updated = binding_service
+        .refresh_presence(&["session-online".to_string()])
+        .await?;
+
+    let online = updated
+        .iter()
+        .find(|binding| binding.id == online_binding.id)
+        .expect("online binding should exist");
+    let offline = updated
+        .iter()
+        .find(|binding| binding.id == offline_binding.id)
+        .expect("offline binding should exist");
+
+    assert!(online.last_seen_at.is_some());
+    assert_eq!(offline.last_seen_at, None);
+
+    Ok(())
+}

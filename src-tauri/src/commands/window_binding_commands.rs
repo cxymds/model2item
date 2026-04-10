@@ -54,3 +54,27 @@ pub async fn list_iterm_sessions() -> Result<Vec<ItermSessionResponse>, String> 
         })
         .collect())
 }
+
+#[tauri::command]
+pub async fn refresh_window_binding_presence(
+    state: State<'_, AppState>,
+) -> Result<Vec<WindowBindingResponse>, String> {
+    let session_service = ItermSessionService::new();
+    let sessions = session_service
+        .list_sessions()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    let binding_service = WindowBindingService::new(state.pool.clone());
+    let bindings = binding_service
+        .refresh_presence(
+            &sessions
+                .iter()
+                .map(|session| session.session_id.clone())
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(bindings.into_iter().map(Into::into).collect())
+}

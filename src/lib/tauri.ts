@@ -25,6 +25,10 @@ export function listWindowBindings() {
   return core.invoke<WindowBindingResponse[]>("list_window_bindings");
 }
 
+export function refreshWindowBindingPresence() {
+  return core.invoke<WindowBindingResponse[]>("refresh_window_binding_presence");
+}
+
 export function listItermSessions() {
   return core.invoke<ItermSessionResponse[]>("list_iterm_sessions");
 }

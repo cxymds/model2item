@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -6,6 +6,7 @@ import {
   listEvaluationCases,
   listItermSessions,
   listWindowBindings,
+  refreshWindowBindingPresence,
   startComparisonRun,
 } from "../../../lib/tauri";
 import type { CreateComparisonRunInput } from "../../../types/api";
@@ -19,6 +20,7 @@ const initialDraft: CreateComparisonRunInput = {
 
 export function CreateRunPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [draft, setDraft] = useState<CreateComparisonRunInput>(initialDraft);
 
   const casesQuery = useQuery({
@@ -41,6 +43,15 @@ export function CreateRunPage() {
     },
     onSuccess: async (run) => {
       await navigate(`/runs/${run.id}`);
+    },
+  });
+  const refreshPresenceMutation = useMutation({
+    mutationFn: refreshWindowBindingPresence,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["window-bindings"] }),
+        queryClient.invalidateQueries({ queryKey: ["iterm-sessions"] }),
+      ]);
     },
   });
 
@@ -145,7 +156,19 @@ export function CreateRunPage() {
             ))}
           </select>
         </label>
-        <p className="muted">离线窗口会被禁用；如需刷新窗口状态，请先到目标配置页刷新会话。</p>
+        <div className="stack-inline">
+          <button
+            className="secondary-btn"
+            disabled={refreshPresenceMutation.isPending}
+            onClick={() => {
+              refreshPresenceMutation.mutate();
+            }}
+            type="button"
+          >
+            {refreshPresenceMutation.isPending ? "刷新中..." : "刷新窗口状态"}
+          </button>
+          <p className="muted">离线窗口会被禁用；可在当前页面刷新窗口在线状态。</p>
+        </div>
 
         <label className="field">
           <span>运行备注</span>
@@ -167,6 +190,11 @@ export function CreateRunPage() {
         ) : null}
         {sessionsQuery.isError ? (
           <p className="error-text">加载 iTerm2 会话失败。{String(sessionsQuery.error)}</p>
+        ) : null}
+        {refreshPresenceMutation.isError ? (
+          <p className="error-text">
+            刷新窗口状态失败。{String(refreshPresenceMutation.error)}
+          </p>
         ) : null}
         {createRunMutation.isError ? (
           <p className="error-text">创建或启动运行任务失败。{String(createRunMutation.error)}</p>
