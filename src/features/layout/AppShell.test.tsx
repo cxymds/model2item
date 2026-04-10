@@ -18,6 +18,7 @@ describe("AppShell", () => {
     );
 
     expect(screen.getByText("运行任务")).toBeInTheDocument();
+    expect(screen.getByText("历史运行")).toBeInTheDocument();
     expect(screen.getByText("案例库")).toBeInTheDocument();
     expect(screen.getByText("目标配置")).toBeInTheDocument();
     expect(screen.getByText("设置")).toBeInTheDocument();

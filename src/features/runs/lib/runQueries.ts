@@ -1,4 +1,16 @@
-import { getComparisonRun, getComparisonSummary, listComparisonTargets } from "../../../lib/tauri";
+import {
+  getComparisonRun,
+  getComparisonSummary,
+  listComparisonRuns,
+  listComparisonTargets,
+} from "../../../lib/tauri";
+
+export function comparisonRunsQuery() {
+  return {
+    queryKey: ["comparison-runs"],
+    queryFn: listComparisonRuns,
+  };
+}
 
 export function comparisonRunQuery(runId: string) {
   return {

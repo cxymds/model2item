@@ -4,6 +4,7 @@ import { getRecentRunHref, getRecentRunLabel, useRecentRun } from "../runs/lib/r
 
 const navItems = [
   { to: "/runs/new", label: "运行任务" },
+  { to: "/runs/history", label: "历史运行" },
   { to: "/cases", label: "案例库" },
   { to: "/targets", label: "目标配置" },
   { to: "/settings", label: "设置" }

@@ -189,6 +189,24 @@ impl ComparisonRunService {
         Ok(row)
     }
 
+    pub async fn list_comparison_runs(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<ComparisonRunRecord>, AppError> {
+        let rows = sqlx::query_as::<_, ComparisonRunRecord>(
+            r#"
+            SELECT *
+            FROM comparison_runs
+            ORDER BY datetime(created_at) DESC, rowid DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     pub async fn list_comparison_targets(
         &self,
         run_id: &str,

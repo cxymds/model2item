@@ -7,8 +7,7 @@ use crate::{
         CreateComparisonRunInput,
     },
     services::{
-        analysis_service::AnalysisService,
-        comparison_orchestrator::ComparisonOrchestrator,
+        analysis_service::AnalysisService, comparison_orchestrator::ComparisonOrchestrator,
         comparison_run_service::ComparisonRunService,
     },
 };
@@ -37,6 +36,18 @@ pub async fn get_comparison_run(
         .await
         .map_err(|error| error.to_string())?;
     Ok(run.into())
+}
+
+#[tauri::command]
+pub async fn list_comparison_runs(
+    state: State<'_, AppState>,
+) -> Result<Vec<ComparisonRunResponse>, String> {
+    let service = ComparisonRunService::new(state.pool.clone());
+    let runs = service
+        .list_comparison_runs(20)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(runs.into_iter().map(Into::into).collect())
 }
 
 #[tauri::command]

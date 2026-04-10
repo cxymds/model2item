@@ -67,6 +67,10 @@ export function createComparisonRun(input: CreateComparisonRunInput) {
   return core.invoke<ComparisonRunResponse>("create_comparison_run", { input });
 }
 
+export function listComparisonRuns() {
+  return core.invoke<ComparisonRunResponse[]>("list_comparison_runs");
+}
+
 export function startComparisonRun(runId: string) {
   return core.invoke<void>("start_comparison_run", { runId });
 }
