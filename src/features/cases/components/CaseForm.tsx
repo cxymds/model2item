@@ -3,6 +3,9 @@ import type { CreateEvaluationCaseInput } from "../../../types/api";
 
 type CaseFormProps = {
   isPending: boolean;
+  initialValue?: CreateEvaluationCaseInput;
+  submitLabel?: string;
+  resetOnSubmit?: boolean;
   onSubmit: (input: CreateEvaluationCaseInput) => void;
 };
 
@@ -13,8 +16,14 @@ const initialState: CreateEvaluationCaseInput = {
   notes: "",
 };
 
-export function CaseForm({ isPending, onSubmit }: CaseFormProps) {
-  const [form, setForm] = useState<CreateEvaluationCaseInput>(initialState);
+export function CaseForm({
+  isPending,
+  initialValue,
+  submitLabel,
+  resetOnSubmit = true,
+  onSubmit,
+}: CaseFormProps) {
+  const [form, setForm] = useState<CreateEvaluationCaseInput>(initialValue ?? initialState);
   const [jsonError, setJsonError] = useState<string>("");
 
   return (
@@ -34,7 +43,9 @@ export function CaseForm({ isPending, onSubmit }: CaseFormProps) {
           ...form,
           notes: form.notes?.trim() ?? "",
         });
-        setForm(initialState);
+        if (resetOnSubmit) {
+          setForm(initialState);
+        }
       }}
     >
       <label className="field">
@@ -88,7 +99,7 @@ export function CaseForm({ isPending, onSubmit }: CaseFormProps) {
       </label>
 
       <button className="primary-btn" disabled={isPending} type="submit">
-        {isPending ? "保存中..." : "保存评测案例"}
+        {isPending ? "保存中..." : submitLabel ?? "保存评测案例"}
       </button>
     </form>
   );

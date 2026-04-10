@@ -43,3 +43,10 @@ pub struct CreateWindowBindingInput {
     pub display_name: String,
     pub profile_id: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateWindowBindingInput {
+    pub iterm_session_id: String,
+    pub display_name: String,
+    pub profile_id: String,
+}

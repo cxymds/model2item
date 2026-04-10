@@ -1,10 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { CaseForm } from "../components/CaseForm";
-import { createEvaluationCase, listEvaluationCases } from "../../../lib/tauri";
+import {
+  createEvaluationCase,
+  deleteEvaluationCase,
+  listEvaluationCases,
+  updateEvaluationCase,
+} from "../../../lib/tauri";
 import { formatDateTime } from "../../../lib/formatters";
+import type { CreateEvaluationCaseInput } from "../../../types/api";
+
+function getErrorMessage(error: unknown) {
+  const message = String(error);
+  return message.startsWith("Error: ") ? message.slice(7) : message;
+}
 
 export function CaseLibraryPage() {
   const queryClient = useQueryClient();
+  const [editingCaseId, setEditingCaseId] = useState<string | null>(null);
   const casesQuery = useQuery({
     queryKey: ["evaluation-cases"],
     queryFn: listEvaluationCases,
@@ -12,6 +25,20 @@ export function CaseLibraryPage() {
 
   const createCaseMutation = useMutation({
     mutationFn: createEvaluationCase,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["evaluation-cases"] });
+    },
+  });
+  const updateCaseMutation = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: CreateEvaluationCaseInput }) =>
+      updateEvaluationCase(id, input),
+    onSuccess: async () => {
+      setEditingCaseId(null);
+      await queryClient.invalidateQueries({ queryKey: ["evaluation-cases"] });
+    },
+  });
+  const deleteCaseMutation = useMutation({
+    mutationFn: deleteEvaluationCase,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["evaluation-cases"] });
     },
@@ -41,6 +68,12 @@ export function CaseLibraryPage() {
           {casesQuery.isError ? (
             <p className="error-text">加载案例失败。{String(casesQuery.error)}</p>
           ) : null}
+          {updateCaseMutation.isError ? (
+            <p className="error-text">{getErrorMessage(updateCaseMutation.error)}</p>
+          ) : null}
+          {deleteCaseMutation.isError ? (
+            <p className="error-text">{getErrorMessage(deleteCaseMutation.error)}</p>
+          ) : null}
           {casesQuery.data && casesQuery.data.length === 0 ? (
             <p className="muted">还没有评测案例。</p>
           ) : null}
@@ -48,9 +81,60 @@ export function CaseLibraryPage() {
             <ul className="card-list">
               {casesQuery.data.map((item) => (
                 <li className="data-card" key={item.id}>
-                  <strong>{item.title}</strong>
-                  <p>{item.prompt.slice(0, 160)}...</p>
-                  <span>创建时间：{formatDateTime(item.created_at)}</span>
+                  {editingCaseId === item.id ? (
+                    <>
+                      <CaseForm
+                        initialValue={{
+                          title: item.title,
+                          prompt: item.prompt,
+                          context_payload: item.context_payload,
+                          notes: item.notes,
+                        }}
+                        isPending={updateCaseMutation.isPending}
+                        onSubmit={(input) => {
+                          updateCaseMutation.mutate({ id: item.id, input });
+                        }}
+                        resetOnSubmit={false}
+                        submitLabel="保存修改"
+                      />
+                      <button
+                        className="ghost-btn"
+                        onClick={() => {
+                          setEditingCaseId(null);
+                        }}
+                        type="button"
+                      >
+                        取消编辑
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{item.title}</strong>
+                      <p>{item.prompt.slice(0, 160)}...</p>
+                      <span>创建时间：{formatDateTime(item.created_at)}</span>
+                      <div className="stack-inline">
+                        <button
+                          className="ghost-btn"
+                          onClick={() => {
+                            setEditingCaseId(item.id);
+                          }}
+                          type="button"
+                        >
+                          编辑 {item.title}
+                        </button>
+                        <button
+                          className="ghost-btn"
+                          onClick={() => {
+                            if (!window.confirm(`确认删除案例“${item.title}”吗？`)) return;
+                            deleteCaseMutation.mutate(item.id);
+                          }}
+                          type="button"
+                        >
+                          删除 {item.title}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>

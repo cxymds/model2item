@@ -4,7 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    models::window_binding::{CreateWindowBindingInput, WindowBindingRecord},
+    models::window_binding::{
+        CreateWindowBindingInput, UpdateWindowBindingInput, WindowBindingRecord,
+    },
 };
 
 #[derive(Clone)]
@@ -56,6 +58,50 @@ impl WindowBindingService {
         .fetch_one(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    pub async fn update_window_binding(
+        &self,
+        id: &str,
+        input: UpdateWindowBindingInput,
+    ) -> Result<WindowBindingRecord, AppError> {
+        sqlx::query(
+            r#"
+            UPDATE window_bindings
+            SET iterm_session_id = ?, display_name = ?, profile_id = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&input.iterm_session_id)
+        .bind(&input.display_name)
+        .bind(&input.profile_id)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        self.get_window_binding(id).await
+    }
+
+    pub async fn delete_window_binding(&self, id: &str) -> Result<(), AppError> {
+        let reference_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM comparison_targets WHERE window_binding_id = ?",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if reference_count > 0 {
+            return Err(AppError::InvalidInput(
+                "window binding is referenced by comparison runs".to_string(),
+            ));
+        }
+
+        sqlx::query("DELETE FROM window_bindings WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 
     pub async fn refresh_presence(

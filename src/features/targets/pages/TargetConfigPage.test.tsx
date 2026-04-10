@@ -1,12 +1,31 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import { TargetConfigPage } from "./TargetConfigPage";
+
+const { updateWindowBinding, deleteWindowBinding } = vi.hoisted(() => {
+  return {
+    updateWindowBinding: vi.fn().mockResolvedValue({
+      id: "binding-1",
+      iterm_session_id: "session-1b",
+      display_name: "Window A Updated",
+      profile_id: "profile-1",
+      enabled: 1,
+      last_seen_at: "2026-01-01T00:00:00Z",
+      metadata_json: "{}",
+    }),
+    deleteWindowBinding: vi
+      .fn()
+      .mockRejectedValue(new Error("已被运行任务引用，暂时不能删除")),
+  };
+});
 
 vi.mock("../../../lib/tauri", () => {
   return {
     createProfile: vi.fn(),
     createWindowBinding: vi.fn(),
+    updateWindowBinding,
+    deleteWindowBinding,
     listProfiles: vi.fn().mockResolvedValue([
       {
         id: "profile-1",
@@ -71,6 +90,10 @@ function renderPage() {
 }
 
 describe("TargetConfigPage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("shows discovered iTerm sessions only in the binding form selector", async () => {
     renderPage();
 
@@ -79,5 +102,37 @@ describe("TargetConfigPage", () => {
     expect(screen.queryByText("Project A")).not.toBeInTheDocument();
     expect(screen.getByText("连接状态：在线")).toBeInTheDocument();
     expect(screen.getByText("连接状态：离线")).toBeInTheDocument();
+  });
+
+  it("updates an existing window binding", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑 Window A" }));
+    fireEvent.change(screen.getByDisplayValue("Window A"), {
+      target: { value: "Window A Updated" },
+    });
+    fireEvent.change(screen.getByDisplayValue("session-1"), {
+      target: { value: "session-1b" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存绑定" }));
+
+    await waitFor(() => {
+      expect(updateWindowBinding).toHaveBeenCalledWith("binding-1", {
+        display_name: "Window A Updated",
+        iterm_session_id: "session-1b",
+        profile_id: "profile-1",
+      });
+    });
+  });
+
+  it("shows an error when deleting a referenced binding", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "删除 Window A" }));
+
+    await screen.findByText("已被运行任务引用，暂时不能删除");
+    expect(deleteWindowBinding).toHaveBeenCalled();
+    expect(deleteWindowBinding.mock.calls[0]?.[0]).toBe("binding-1");
   });
 });

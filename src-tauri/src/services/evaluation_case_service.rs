@@ -4,7 +4,9 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    models::evaluation_case::{CreateEvaluationCaseInput, EvaluationCaseRecord},
+    models::evaluation_case::{
+        CreateEvaluationCaseInput, EvaluationCaseRecord, UpdateEvaluationCaseInput,
+    },
 };
 
 #[derive(Clone)]
@@ -65,5 +67,57 @@ impl EvaluationCaseService {
         .fetch_one(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    pub async fn update_evaluation_case(
+        &self,
+        id: &str,
+        input: UpdateEvaluationCaseInput,
+    ) -> Result<EvaluationCaseRecord, AppError> {
+        serde_json::from_str::<serde_json::Value>(&input.context_payload)
+            .map_err(|error| AppError::InvalidJsonInput(error.to_string()))?;
+
+        let notes = input.notes.unwrap_or_default();
+        let now = Utc::now().to_rfc3339();
+
+        sqlx::query(
+            r#"
+            UPDATE evaluation_cases
+            SET title = ?, prompt = ?, context_payload = ?, notes = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&input.title)
+        .bind(&input.prompt)
+        .bind(&input.context_payload)
+        .bind(notes)
+        .bind(&now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        self.get_evaluation_case(id).await
+    }
+
+    pub async fn delete_evaluation_case(&self, id: &str) -> Result<(), AppError> {
+        let reference_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM comparison_runs WHERE evaluation_case_id = ?",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if reference_count > 0 {
+            return Err(AppError::InvalidInput(
+                "evaluation case is referenced by comparison runs".to_string(),
+            ));
+        }
+
+        sqlx::query("DELETE FROM evaluation_cases WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
     }
 }

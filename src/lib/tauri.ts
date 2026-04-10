@@ -10,6 +10,8 @@ import type {
   EvaluationCaseResponse,
   ItermSessionResponse,
   ProfileResponse,
+  UpdateEvaluationCaseInput,
+  UpdateWindowBindingInput,
   WindowBindingResponse,
 } from "../types/api";
 
@@ -37,12 +39,28 @@ export function createWindowBinding(input: CreateWindowBindingInput) {
   return core.invoke<WindowBindingResponse>("create_window_binding", { input });
 }
 
+export function updateWindowBinding(id: string, input: UpdateWindowBindingInput) {
+  return core.invoke<WindowBindingResponse>("update_window_binding", { id, input });
+}
+
+export function deleteWindowBinding(id: string) {
+  return core.invoke<void>("delete_window_binding", { id });
+}
+
 export function listEvaluationCases() {
   return core.invoke<EvaluationCaseResponse[]>("list_evaluation_cases");
 }
 
 export function createEvaluationCase(input: CreateEvaluationCaseInput) {
   return core.invoke<EvaluationCaseResponse>("create_evaluation_case", { input });
+}
+
+export function updateEvaluationCase(id: string, input: UpdateEvaluationCaseInput) {
+  return core.invoke<EvaluationCaseResponse>("update_evaluation_case", { id, input });
+}
+
+export function deleteEvaluationCase(id: string) {
+  return core.invoke<void>("delete_evaluation_case", { id });
 }
 
 export function createComparisonRun(input: CreateComparisonRunInput) {

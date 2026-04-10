@@ -3,7 +3,9 @@ use tauri::State;
 use crate::{
     app_state::AppState,
     models::iterm_session::ItermSessionResponse,
-    models::window_binding::{CreateWindowBindingInput, WindowBindingResponse},
+    models::window_binding::{
+        CreateWindowBindingInput, UpdateWindowBindingInput, WindowBindingResponse,
+    },
     services::{
         iterm_session_service::ItermSessionService, window_binding_service::WindowBindingService,
     },
@@ -32,6 +34,29 @@ pub async fn list_window_bindings(
         .await
         .map_err(|error| error.to_string())?;
     Ok(bindings.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
+pub async fn update_window_binding(
+    state: State<'_, AppState>,
+    id: String,
+    input: UpdateWindowBindingInput,
+) -> Result<WindowBindingResponse, String> {
+    let service = WindowBindingService::new(state.pool.clone());
+    let binding = service
+        .update_window_binding(&id, input)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(binding.into())
+}
+
+#[tauri::command]
+pub async fn delete_window_binding(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let service = WindowBindingService::new(state.pool.clone());
+    service
+        .delete_window_binding(&id)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]

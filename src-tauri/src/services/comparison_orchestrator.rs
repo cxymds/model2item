@@ -4,15 +4,15 @@ use crate::{
     error::AppError,
     services::{
         comparison_run_service::{ComparisonRunService, ComparisonTargetExecutionRecord},
-        iterm_mcp_adapter::{ItermExecutionRequest, ItermMcpAdapter, PythonItermMcpAdapter},
+        iterm_mcp_adapter::{
+            classify_adapter_error, ItermExecutionRequest, ItermMcpAdapter, PythonItermMcpAdapter,
+        },
         secret_store::{SecretStore, SystemSecretStore},
     },
 };
 
 fn build_target_prompt(run_prompt: &str, context_snapshot: &str) -> String {
-    format!(
-        "## Evaluation Prompt\n{run_prompt}\n\n## Context Payload\n{context_snapshot}\n"
-    )
+    format!("## Evaluation Prompt\n{run_prompt}\n\n## Context Payload\n{context_snapshot}\n")
 }
 
 #[derive(Clone)]
@@ -47,7 +47,10 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
 
     pub async fn execute_run(&self, run_id: &str) -> Result<(), AppError> {
         let run = self.run_service.get_comparison_run(run_id).await?;
-        let targets = self.run_service.list_target_execution_records(run_id).await?;
+        let targets = self
+            .run_service
+            .list_target_execution_records(run_id)
+            .await?;
         if targets.is_empty() {
             return Err(AppError::InvalidInput(format!(
                 "comparison run {run_id} has no targets"
@@ -60,7 +63,11 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
 
         let mut failed_count = 0usize;
         for target in targets {
-            if self.execute_target(&run.prompt_snapshot, &run.context_snapshot, &target).await.is_err() {
+            if self
+                .execute_target(&run.prompt_snapshot, &run.context_snapshot, &target)
+                .await
+                .is_err()
+            {
                 failed_count += 1;
             }
         }
@@ -77,7 +84,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             .adapter
             .list_sessions()
             .await
-            .map_err(AppError::Adapter)?
+            .map_err(classify_adapter_error)?
             .into_iter()
             .map(|session| session.session_id)
             .collect::<std::collections::HashSet<_>>();
@@ -104,7 +111,9 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
         context_snapshot: &str,
         target: &ComparisonTargetExecutionRecord,
     ) -> Result<(), AppError> {
-        self.run_service.mark_target_running(&target.target_id).await?;
+        self.run_service
+            .mark_target_running(&target.target_id)
+            .await?;
 
         let request_prompt = build_target_prompt(run_prompt, context_snapshot);
         self.run_service
@@ -115,6 +124,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
         let result = self
             .adapter
             .execute_prompt(ItermExecutionRequest {
+                request_id: target.target_id.clone(),
                 session_id: target.iterm_session_id.clone(),
                 prompt: request_prompt,
                 provider: target.provider.clone(),
@@ -127,15 +137,16 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             .await;
 
         match result {
-            Ok(result) => self
-                .run_service
-                .mark_target_completed(&target.target_id, &result.output_text)
-                .await,
+            Ok(result) => {
+                self.run_service
+                    .mark_target_completed(&target.target_id, &result.output_text)
+                    .await
+            }
             Err(error) => {
                 self.run_service
                     .mark_target_failed(&target.target_id, "adapter_error", &error)
                     .await?;
-                Err(AppError::Adapter(error))
+                Err(classify_adapter_error(error))
             }
         }
     }

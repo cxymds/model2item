@@ -3,6 +3,7 @@ import type {
   CreateWindowBindingInput,
   ItermSessionResponse,
   ProfileResponse,
+  UpdateWindowBindingInput,
   WindowBindingResponse,
 } from "../../../types/api";
 import { formatDateTime, shortenId } from "../../../lib/formatters";
@@ -13,8 +14,13 @@ type WindowBindingListProps = {
   profiles: ProfileResponse[];
   isPending: boolean;
   isRefreshingSessions: boolean;
+  isUpdatingBinding: boolean;
+  isDeletingBinding: boolean;
+  actionError?: string;
   onRefreshSessions: () => void;
   onCreate: (input: CreateWindowBindingInput) => void;
+  onUpdate: (id: string, input: UpdateWindowBindingInput) => void;
+  onDelete: (id: string) => void;
 };
 
 export function WindowBindingList({
@@ -23,10 +29,21 @@ export function WindowBindingList({
   profiles,
   isPending,
   isRefreshingSessions,
+  isUpdatingBinding,
+  isDeletingBinding,
+  actionError,
   onRefreshSessions,
   onCreate,
+  onUpdate,
+  onDelete,
 }: WindowBindingListProps) {
   const [form, setForm] = useState<CreateWindowBindingInput>({
+    iterm_session_id: "",
+    display_name: "",
+    profile_id: "",
+  });
+  const [editingBindingId, setEditingBindingId] = useState<string | null>(null);
+  const [editingForm, setEditingForm] = useState<UpdateWindowBindingInput>({
     iterm_session_id: "",
     display_name: "",
     profile_id: "",
@@ -138,6 +155,7 @@ export function WindowBindingList({
           {isRefreshingSessions ? "刷新中..." : "刷新会话"}
         </button>
       </form>
+      {actionError ? <p className="error-text">{actionError}</p> : null}
 
       <div className="list-block">
         <h3>当前绑定</h3>
@@ -148,17 +166,118 @@ export function WindowBindingList({
             {bindings.map((binding) => {
               const profile = profileMap.get(binding.profile_id);
               const isOnline = onlineSessionIds.has(binding.iterm_session_id);
+              const isEditing = editingBindingId === binding.id;
               return (
                 <li className="data-card" key={binding.id}>
-                  <strong>{binding.display_name}</strong>
-                  <span>会话：{binding.iterm_session_id}</span>
-                  <span>
-                    配置：
-                    {profile ? `${profile.name} (${profile.model_name})` : `未知配置 ${shortenId(binding.profile_id)}`}
-                  </span>
-                  <span>启用状态：{binding.enabled === 1 ? "已启用" : "已禁用"}</span>
-                  <span>连接状态：{isOnline ? "在线" : "离线"}</span>
-                  <span>最近在线：{formatDateTime(binding.last_seen_at)}</span>
+                  {isEditing ? (
+                    <>
+                      <label className="field">
+                        <span>显示名称</span>
+                        <input
+                          value={editingForm.display_name}
+                          onChange={(event) => {
+                            setEditingForm((current) => ({
+                              ...current,
+                              display_name: event.target.value,
+                            }));
+                          }}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>会话 ID</span>
+                        <input
+                          value={editingForm.iterm_session_id}
+                          onChange={(event) => {
+                            setEditingForm((current) => ({
+                              ...current,
+                              iterm_session_id: event.target.value,
+                            }));
+                          }}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>绑定配置</span>
+                        <select
+                          value={editingForm.profile_id}
+                          onChange={(event) => {
+                            setEditingForm((current) => ({
+                              ...current,
+                              profile_id: event.target.value,
+                            }));
+                          }}
+                        >
+                          {profiles.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name} ({item.model_name})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div className="stack-inline">
+                        <button
+                          className="primary-btn"
+                          disabled={isUpdatingBinding}
+                          onClick={() => {
+                            onUpdate(binding.id, editingForm);
+                            setEditingBindingId(null);
+                          }}
+                          type="button"
+                        >
+                          保存绑定
+                        </button>
+                        <button
+                          className="ghost-btn"
+                          onClick={() => {
+                            setEditingBindingId(null);
+                          }}
+                          type="button"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{binding.display_name}</strong>
+                      <span>会话：{binding.iterm_session_id}</span>
+                      <span>
+                        配置：
+                        {profile
+                          ? `${profile.name} (${profile.model_name})`
+                          : `未知配置 ${shortenId(binding.profile_id)}`}
+                      </span>
+                      <span>启用状态：{binding.enabled === 1 ? "已启用" : "已禁用"}</span>
+                      <span>连接状态：{isOnline ? "在线" : "离线"}</span>
+                      <span>最近在线：{formatDateTime(binding.last_seen_at)}</span>
+                      <div className="stack-inline">
+                        <button
+                          className="ghost-btn"
+                          onClick={() => {
+                            setEditingBindingId(binding.id);
+                            setEditingForm({
+                              display_name: binding.display_name,
+                              iterm_session_id: binding.iterm_session_id,
+                              profile_id: binding.profile_id,
+                            });
+                          }}
+                          type="button"
+                        >
+                          编辑 {binding.display_name}
+                        </button>
+                        <button
+                          className="ghost-btn"
+                          disabled={isDeletingBinding}
+                          onClick={() => {
+                            if (!window.confirm(`确认删除绑定“${binding.display_name}”吗？`)) return;
+                            onDelete(binding.id);
+                          }}
+                          type="button"
+                        >
+                          删除 {binding.display_name}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </li>
               );
             })}

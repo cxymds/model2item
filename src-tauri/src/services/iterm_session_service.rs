@@ -1,6 +1,8 @@
 use crate::{
     error::AppError,
-    services::iterm_mcp_adapter::{ItermMcpAdapter, ItermSessionInfo, PythonItermMcpAdapter},
+    services::iterm_mcp_adapter::{
+        classify_adapter_error, ItermMcpAdapter, ItermSessionInfo, PythonItermMcpAdapter,
+    },
 };
 
 #[derive(Clone)]
@@ -25,6 +27,6 @@ impl<A: ItermMcpAdapter> ItermSessionService<A> {
         self.adapter
             .list_sessions()
             .await
-            .map_err(AppError::Adapter)
+            .map_err(classify_adapter_error)
     }
 }

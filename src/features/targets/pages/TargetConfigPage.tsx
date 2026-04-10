@@ -2,14 +2,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createProfile,
   createWindowBinding,
+  deleteWindowBinding,
   listItermSessions,
   listProfiles,
   listWindowBindings,
   refreshWindowBindingPresence,
+  updateWindowBinding,
 } from "../../../lib/tauri";
 import { formatDateTime } from "../../../lib/formatters";
 import { ProfileForm } from "../components/ProfileForm";
 import { WindowBindingList } from "../components/WindowBindingList";
+
+function getErrorMessage(error: unknown) {
+  const message = String(error);
+  return message.startsWith("Error: ") ? message.slice(7) : message;
+}
 
 export function TargetConfigPage() {
   const queryClient = useQueryClient();
@@ -46,6 +53,21 @@ export function TargetConfigPage() {
         queryClient.invalidateQueries({ queryKey: ["window-bindings"] }),
         queryClient.invalidateQueries({ queryKey: ["iterm-sessions"] }),
       ]);
+    },
+  });
+  const updateBindingMutation = useMutation({
+    mutationFn: ({ id, input }: Parameters<typeof updateWindowBinding>[0] extends never
+      ? never
+      : { id: string; input: Parameters<typeof updateWindowBinding>[1] }) =>
+      updateWindowBinding(id, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["window-bindings"] });
+    },
+  });
+  const deleteBindingMutation = useMutation({
+    mutationFn: deleteWindowBinding,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["window-bindings"] });
     },
   });
 
@@ -111,6 +133,19 @@ export function TargetConfigPage() {
             }}
             onCreate={(input) => {
               createBindingMutation.mutate(input);
+            }}
+            isUpdatingBinding={updateBindingMutation.isPending}
+            isDeletingBinding={deleteBindingMutation.isPending}
+            actionError={
+              (updateBindingMutation.isError && getErrorMessage(updateBindingMutation.error)) ||
+              (deleteBindingMutation.isError && getErrorMessage(deleteBindingMutation.error)) ||
+              undefined
+            }
+            onUpdate={(id, input) => {
+              updateBindingMutation.mutate({ id, input });
+            }}
+            onDelete={(id) => {
+              deleteBindingMutation.mutate(id);
             }}
           />
         </div>

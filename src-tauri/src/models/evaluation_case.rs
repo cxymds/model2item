@@ -50,3 +50,11 @@ pub struct CreateEvaluationCaseInput {
     pub context_payload: String,
     pub notes: Option<String>,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateEvaluationCaseInput {
+    pub title: String,
+    pub prompt: String,
+    pub context_payload: String,
+    pub notes: Option<String>,
+}

@@ -45,6 +45,12 @@ export type CreateWindowBindingInput = {
   profile_id: string;
 };
 
+export type UpdateWindowBindingInput = {
+  iterm_session_id: string;
+  display_name: string;
+  profile_id: string;
+};
+
 export type EvaluationCaseResponse = {
   id: string;
   title: string;
@@ -58,6 +64,13 @@ export type EvaluationCaseResponse = {
 };
 
 export type CreateEvaluationCaseInput = {
+  title: string;
+  prompt: string;
+  context_payload: string;
+  notes?: string;
+};
+
+export type UpdateEvaluationCaseInput = {
   title: string;
   prompt: string;
   context_payload: string;
