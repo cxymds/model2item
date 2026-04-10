@@ -1,6 +1,6 @@
 pub mod schema;
 
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 
 use sqlx::{
     migrate::Migrator,
@@ -14,12 +14,34 @@ pub async fn connect(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
     connect_with_max_connections(database_url, 5).await
 }
 
+pub async fn connect_file(database_path: impl AsRef<Path>) -> Result<SqlitePool, sqlx::Error> {
+    connect_file_with_max_connections(database_path, 5).await
+}
+
 pub async fn connect_with_max_connections(
     database_url: &str,
     max_connections: u32,
 ) -> Result<SqlitePool, sqlx::Error> {
     let connect_options = SqliteConnectOptions::from_str(database_url)?.foreign_keys(true);
+    connect_with_options(connect_options, max_connections).await
+}
 
+pub async fn connect_file_with_max_connections(
+    database_path: impl AsRef<Path>,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
+    let connect_options = SqliteConnectOptions::new()
+        .filename(database_path)
+        .create_if_missing(true)
+        .foreign_keys(true);
+
+    connect_with_options(connect_options, max_connections).await
+}
+
+async fn connect_with_options(
+    connect_options: SqliteConnectOptions,
+    max_connections: u32,
+) -> Result<SqlitePool, sqlx::Error> {
     let pool = SqlitePoolOptions::new()
         .max_connections(max_connections)
         .after_connect(|conn, _meta| {
