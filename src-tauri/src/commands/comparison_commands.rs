@@ -137,6 +137,12 @@ pub async fn start_comparison_run(
         ));
     }
 
+    let orchestrator = ComparisonOrchestrator::new(pool.clone());
+    orchestrator
+        .validate_run_startup(&run_id)
+        .await
+        .map_err(|error| error.to_string())?;
+
     tauri::async_runtime::spawn(async move {
         let orchestrator = ComparisonOrchestrator::new(pool);
         if let Err(error) = orchestrator.execute_run(&run_id).await {

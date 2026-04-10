@@ -35,22 +35,56 @@ impl ComparisonOrchestrator<PythonItermMcpAdapter> {
 }
 
 impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
-    async fn capture_interactive_output(&self, session_id: &str) -> Result<String, AppError> {
-        const MAX_SCREEN_READ_ATTEMPTS: usize = 6;
-        const SCREEN_READ_INTERVAL_MS: u64 = 400;
+    async fn read_screen_text(&self, session_id: &str) -> Result<String, AppError> {
+        self.adapter
+            .get_screen_text(session_id)
+            .await
+            .map_err(classify_adapter_error)
+    }
 
-        let mut latest_non_empty = String::new();
+    fn extract_incremental_output(previous_screen: &str, current_screen: &str) -> String {
+        let current_screen = current_screen.trim();
+        let previous_screen = previous_screen.trim();
+
+        if current_screen.is_empty() || current_screen == previous_screen {
+            return String::new();
+        }
+
+        if previous_screen.is_empty() {
+            return current_screen.to_string();
+        }
+
+        if let Some(suffix) = current_screen.strip_prefix(previous_screen) {
+            return suffix.trim().to_string();
+        }
+
+        let mut prefix_bytes = 0usize;
+        let mut previous_chars = previous_screen.chars();
+        for (byte_index, current_char) in current_screen.char_indices() {
+            match previous_chars.next() {
+                Some(previous_char) if previous_char == current_char => {
+                    prefix_bytes = byte_index + current_char.len_utf8();
+                }
+                _ => break,
+            }
+        }
+
+        current_screen[prefix_bytes..].trim().to_string()
+    }
+
+    async fn capture_incremental_interactive_output(
+        &self,
+        session_id: &str,
+        baseline_screen: &str,
+    ) -> Result<(String, String), AppError> {
+        const MAX_SCREEN_READ_ATTEMPTS: usize = 20;
+        const SCREEN_READ_INTERVAL_MS: u64 = 500;
 
         for attempt in 0..MAX_SCREEN_READ_ATTEMPTS {
-            let screen_text = self
-                .adapter
-                .get_screen_text(session_id)
-                .await
-                .map_err(classify_adapter_error)?;
-
-            if !screen_text.trim().is_empty() {
-                latest_non_empty = screen_text;
-                break;
+            let screen_text = self.read_screen_text(session_id).await?;
+            let delta = Self::extract_incremental_output(baseline_screen, &screen_text);
+            if !delta.is_empty() {
+                return Ok((screen_text, delta));
             }
 
             if attempt + 1 < MAX_SCREEN_READ_ATTEMPTS {
@@ -58,7 +92,9 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             }
         }
 
-        Ok(latest_non_empty)
+        Err(AppError::Adapter(format!(
+            "timed out waiting for new interactive output from session {session_id}"
+        )))
     }
 
     pub fn with_dependencies(
@@ -71,6 +107,40 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             secret_store,
             adapter,
         }
+    }
+
+    pub async fn validate_run_startup(&self, run_id: &str) -> Result<(), AppError> {
+        let run = self.run_service.get_comparison_run(run_id).await?;
+        let targets = self
+            .run_service
+            .list_target_execution_records(run_id)
+            .await?;
+        if targets.is_empty() {
+            return Err(AppError::InvalidInput(format!(
+                "comparison run {run_id} has no targets"
+            )));
+        }
+
+        self.ensure_targets_online(&targets).await?;
+
+        for target in targets {
+            let api_key = self.secret_store.get_secret(&target.api_key_locator)?;
+            let request = ItermExecutionRequest {
+                request_id: target.target_id,
+                session_id: target.iterm_session_id,
+                prompt: build_target_prompt(&run.prompt_snapshot, &run.context_snapshot),
+                provider: target.provider,
+                model_name: target.model_name,
+                base_url: target.base_url,
+                api_key,
+                system_prompt: target.system_prompt,
+                extra_params_json: target.extra_params_json,
+            };
+
+            build_interactive_claude_launch_command(&request).map_err(AppError::Adapter)?;
+        }
+
+        Ok(())
     }
 
     pub async fn execute_run(&self, run_id: &str) -> Result<(), AppError> {
@@ -131,18 +201,24 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             self.run_service
                 .store_target_message(&target.target_id, "user", prompt, "follow_up")
                 .await?;
+            let baseline_screen = self.read_screen_text(&target.iterm_session_id).await?;
             self.adapter
                 .send_text(&target.iterm_session_id, &format!("{prompt}\n"))
                 .await
                 .map_err(classify_adapter_error)?;
-            let screen_text = self
-                .capture_interactive_output(&target.iterm_session_id)
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let baseline_after_prompt = self.read_screen_text(&target.iterm_session_id).await?;
+            let baseline = if baseline_after_prompt.trim().is_empty() {
+                baseline_screen.as_str()
+            } else {
+                baseline_after_prompt.as_str()
+            };
+            let (_, delta) = self
+                .capture_incremental_interactive_output(&target.iterm_session_id, baseline)
                 .await?;
-            if !screen_text.trim().is_empty() {
-                self.run_service
-                    .record_target_interactive_output(&target.target_id, &screen_text)
-                    .await?;
-            }
+            self.run_service
+                .record_target_interactive_output(&target.target_id, &delta)
+                .await?;
         }
 
         Ok(())
@@ -223,9 +299,18 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                     {
                         Err(error)
                     } else {
-                        self.capture_interactive_output(&target.iterm_session_id)
-                            .await
-                            .map_err(|error| error.to_string())
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                        match self.read_screen_text(&target.iterm_session_id).await {
+                            Ok(baseline_after_prompt) => self
+                                .capture_incremental_interactive_output(
+                                    &target.iterm_session_id,
+                                    &baseline_after_prompt,
+                                )
+                                .await
+                                .map(|(_, delta)| delta)
+                                .map_err(|error| error.to_string()),
+                            Err(error) => Err(error.to_string()),
+                        }
                     }
                 }
             }

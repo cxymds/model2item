@@ -29,6 +29,7 @@ use iterm_mcp_tools_lib::{
 struct FakeAdapter {
     sent_texts: Arc<Mutex<Vec<(String, String)>>>,
     screens: Arc<Mutex<HashMap<String, String>>>,
+    screen_reads: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 #[async_trait]
@@ -70,13 +71,34 @@ impl ItermMcpAdapter for FakeAdapter {
     }
 
     async fn get_screen_text(&self, session_id: &str) -> Result<String, String> {
-        Ok(self
+        let mut screen_reads = self.screen_reads.lock().expect("screen_reads mutex");
+        let current_read = screen_reads.entry(session_id.to_string()).or_insert(0);
+        *current_read += 1;
+
+        let screen_text = self
             .screens
             .lock()
             .expect("screens mutex")
             .get(session_id)
             .cloned()
-            .unwrap_or_default())
+            .unwrap_or_default();
+
+        if session_id != "session-ok" {
+            return Ok(screen_text);
+        }
+
+        if screen_text.contains("Continue with parser edge cases") {
+            return Ok(match *current_read {
+                1..=3 => screen_text.clone(),
+                4 | 5 => screen_text.clone(),
+                _ => format!("{screen_text}\nAssistant follow-up result"),
+            });
+        }
+
+        Ok(match *current_read {
+            1 => screen_text.clone(),
+            _ => format!("{screen_text}\nAssistant initial result"),
+        })
     }
 
     async fn execute_prompt(
@@ -237,11 +259,10 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
         success_target.latest_message_role.as_deref(),
         Some("assistant")
     );
-    assert!(success_target
-        .latest_message_content
-        .as_deref()
-        .unwrap_or_default()
-        .contains("Starting interactive Claude session"));
+    assert_eq!(
+        success_target.latest_message_content.as_deref(),
+        Some("Assistant initial result")
+    );
 
     let fail_target = targets
         .iter()
@@ -273,7 +294,7 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
     assert_eq!(stored_messages.len(), 4);
     let combined_messages = stored_messages.join("\n---\n");
     assert!(combined_messages.contains("Summarize the core control flow"));
-    assert!(combined_messages.contains("Starting interactive Claude session"));
+    assert!(combined_messages.contains("Assistant initial result"));
     assert!(combined_messages.contains("simulated adapter failure"));
 
     Ok(())
@@ -351,6 +372,9 @@ async fn broadcasts_follow_up_input_into_running_target_sessions(
             .await?;
     let combined_messages = stored_messages.join("\n---\n");
     assert!(combined_messages.contains("Continue with parser edge cases"));
+    assert!(combined_messages.contains("Assistant initial result"));
+    assert!(combined_messages.contains("Assistant follow-up result"));
+    assert!(!combined_messages.contains("Starting interactive Claude session"));
 
     Ok(())
 }
