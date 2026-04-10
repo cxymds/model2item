@@ -18,7 +18,9 @@ use iterm_mcp_tools_lib::{
         profile_service::ProfileService,
         secret_store::MemorySecretStore,
         window_binding_service::WindowBindingService,
-        window_binding_sync_service::WindowBindingSyncService,
+        window_binding_sync_service::{
+            create_window_binding_and_sync, WindowBindingSyncService,
+        },
     },
 };
 use std::{
@@ -30,6 +32,33 @@ use std::{
 struct RecordingAdapter {
     texts: Arc<Mutex<Vec<(String, String)>>>,
     screens: Arc<Mutex<HashMap<String, String>>>,
+}
+
+#[derive(Clone, Default)]
+struct FailingAdapter;
+
+#[async_trait]
+impl ItermMcpAdapter for FailingAdapter {
+    async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
+        Ok(Vec::new())
+    }
+
+    async fn send_text(&self, _session_id: &str, _text: &str) -> Result<(), String> {
+        Err("simulated iTerm sync failure".to_string())
+    }
+
+    async fn get_screen_text(&self, _session_id: &str) -> Result<String, String> {
+        Ok(String::new())
+    }
+
+    async fn execute_prompt(
+        &self,
+        _request: ItermExecutionRequest,
+    ) -> Result<ItermExecutionResult, String> {
+        Ok(ItermExecutionResult {
+            output_text: String::new(),
+        })
+    }
 }
 
 #[async_trait]
@@ -375,6 +404,44 @@ async fn applies_binding_to_window_session_and_writes_visible_notice(
         .contains("export ANTHROPIC_BASE_URL='https://gateway.example.com'"));
     assert!(texts[0].1.contains("Bound profile"));
     assert!(texts[0].1.contains("Next run will use claude-sonnet-4"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn rolls_back_created_binding_when_window_sync_fails(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let result = create_window_binding_and_sync(
+        pool.clone(),
+        FailingAdapter,
+        secret_store,
+        CreateWindowBindingInput {
+            iterm_session_id: "session-sync-fail".to_string(),
+            display_name: "Window Sync Fail".to_string(),
+            profile_id: profile.id,
+        },
+    )
+    .await;
+
+    assert!(matches!(result, Err(AppError::Adapter(_))));
+
+    let binding_service = WindowBindingService::new(pool);
+    let bindings = binding_service.list_window_bindings().await?;
+    assert!(bindings.is_empty());
 
     Ok(())
 }

@@ -4,12 +4,14 @@ use sqlx::{FromRow, SqlitePool};
 
 use crate::{
     error::AppError,
+    models::window_binding::{CreateWindowBindingInput, WindowBindingRecord},
     services::{
         iterm_mcp_adapter::{
             build_binding_sync_command, classify_adapter_error, ItermMcpAdapter,
             PythonItermMcpAdapter,
         },
         secret_store::{SecretStore, SystemSecretStore},
+        window_binding_service::WindowBindingService,
     },
 };
 
@@ -90,4 +92,22 @@ impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
             .await
             .map_err(classify_adapter_error)
     }
+}
+
+pub async fn create_window_binding_and_sync<A: ItermMcpAdapter>(
+    pool: SqlitePool,
+    adapter: A,
+    secret_store: Arc<dyn SecretStore>,
+    input: CreateWindowBindingInput,
+) -> Result<WindowBindingRecord, AppError> {
+    let binding_service = WindowBindingService::new(pool.clone());
+    let binding = binding_service.create_window_binding(input).await?;
+    let sync_service = WindowBindingSyncService::with_dependencies(pool, adapter, secret_store);
+
+    if let Err(error) = sync_service.apply_binding(&binding.id).await {
+        binding_service.delete_window_binding(&binding.id).await?;
+        return Err(error);
+    }
+
+    Ok(binding)
 }

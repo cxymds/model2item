@@ -92,6 +92,57 @@ impl ItermMcpAdapter for FakeAdapter {
     }
 }
 
+#[derive(Clone, Default)]
+struct DelayedOutputAdapter {
+    sent_texts: Arc<Mutex<Vec<(String, String)>>>,
+    screen_reads: Arc<Mutex<HashMap<String, usize>>>,
+}
+
+#[async_trait]
+impl ItermMcpAdapter for DelayedOutputAdapter {
+    async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
+        Ok(vec![ItermSessionInfo {
+            session_id: "session-delayed".to_string(),
+            window_id: "window-1".to_string(),
+            window_title: "Window 1".to_string(),
+            tab_id: "tab-1".to_string(),
+            tab_title: "Tab 1".to_string(),
+            session_title: "Pane Delayed".to_string(),
+        }])
+    }
+
+    async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String> {
+        self.sent_texts
+            .lock()
+            .expect("sent_texts mutex")
+            .push((session_id.to_string(), text.to_string()));
+        Ok(())
+    }
+
+    async fn get_screen_text(&self, session_id: &str) -> Result<String, String> {
+        let mut screen_reads = self.screen_reads.lock().expect("screen_reads mutex");
+        let current = screen_reads.entry(session_id.to_string()).or_insert(0);
+        *current += 1;
+        if *current < 3 {
+            Ok(String::new())
+        } else {
+            Ok("Claude 已进入会话，并开始输出首段结果。".to_string())
+        }
+    }
+
+    async fn execute_prompt(
+        &self,
+        request: ItermExecutionRequest,
+    ) -> Result<ItermExecutionResult, String> {
+        Ok(ItermExecutionResult {
+            output_text: format!(
+                "session={} provider={} model={}",
+                request.session_id, request.provider, request.model_name
+            ),
+        })
+    }
+}
+
 #[tokio::test]
 async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
@@ -365,6 +416,84 @@ async fn rejects_run_when_target_session_is_offline() -> Result<(), Box<dyn std:
 
     let targets = run_service.list_comparison_targets(&run.id).await?;
     assert_eq!(targets[0].status, "queued");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = DelayedOutputAdapter::default();
+    let orchestrator = ComparisonOrchestrator::with_dependencies(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Delayed output case".to_string(),
+            prompt: "Wait for the model to respond".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-delayed".to_string(),
+            display_name: "Window Delayed".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Delayed interactive output".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.execute_run(&run.id).await?;
+
+    let targets = run_service.list_comparison_targets(&run.id).await?;
+    let target = targets
+        .iter()
+        .find(|target| target.window_binding_id == binding.id)
+        .expect("target should exist");
+
+    assert_eq!(target.latest_message_role.as_deref(), Some("assistant"));
+    assert_eq!(
+        target.latest_message_content.as_deref(),
+        Some("Claude 已进入会话，并开始输出首段结果。")
+    );
+    assert_eq!(target.response_chars, "Claude 已进入会话，并开始输出首段结果。".chars().count() as i64);
+    assert!(adapter
+        .screen_reads
+        .lock()
+        .expect("screen_reads mutex")
+        .get("session-delayed")
+        .copied()
+        .unwrap_or_default()
+        >= 3);
 
     Ok(())
 }

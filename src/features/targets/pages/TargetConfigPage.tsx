@@ -297,6 +297,7 @@ export function TargetConfigPage() {
             isUpdatingBinding={updateBindingMutation.isPending}
             isDeletingBinding={deleteBindingMutation.isPending}
             actionError={
+              (createBindingMutation.isError && getErrorMessage(createBindingMutation.error)) ||
               (updateBindingMutation.isError && getErrorMessage(updateBindingMutation.error)) ||
               (deleteBindingMutation.isError && getErrorMessage(deleteBindingMutation.error)) ||
               undefined

@@ -35,6 +35,32 @@ impl ComparisonOrchestrator<PythonItermMcpAdapter> {
 }
 
 impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
+    async fn capture_interactive_output(&self, session_id: &str) -> Result<String, AppError> {
+        const MAX_SCREEN_READ_ATTEMPTS: usize = 6;
+        const SCREEN_READ_INTERVAL_MS: u64 = 400;
+
+        let mut latest_non_empty = String::new();
+
+        for attempt in 0..MAX_SCREEN_READ_ATTEMPTS {
+            let screen_text = self
+                .adapter
+                .get_screen_text(session_id)
+                .await
+                .map_err(classify_adapter_error)?;
+
+            if !screen_text.trim().is_empty() {
+                latest_non_empty = screen_text;
+                break;
+            }
+
+            if attempt + 1 < MAX_SCREEN_READ_ATTEMPTS {
+                tokio::time::sleep(Duration::from_millis(SCREEN_READ_INTERVAL_MS)).await;
+            }
+        }
+
+        Ok(latest_non_empty)
+    }
+
     pub fn with_dependencies(
         pool: sqlx::SqlitePool,
         secret_store: Arc<dyn SecretStore>,
@@ -109,12 +135,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                 .send_text(&target.iterm_session_id, &format!("{prompt}\n"))
                 .await
                 .map_err(classify_adapter_error)?;
-            tokio::time::sleep(Duration::from_millis(1200)).await;
-            let screen_text = self
-                .adapter
-                .get_screen_text(&target.iterm_session_id)
-                .await
-                .map_err(classify_adapter_error)?;
+            let screen_text = self.capture_interactive_output(&target.iterm_session_id).await?;
             if !screen_text.trim().is_empty() {
                 self.run_service
                     .record_target_interactive_output(&target.target_id, &screen_text)
@@ -200,8 +221,9 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                     {
                         Err(error)
                     } else {
-                        tokio::time::sleep(Duration::from_millis(1200)).await;
-                        self.adapter.get_screen_text(&target.iterm_session_id).await
+                        self.capture_interactive_output(&target.iterm_session_id)
+                            .await
+                            .map_err(|error| error.to_string())
                     }
                 }
             }
