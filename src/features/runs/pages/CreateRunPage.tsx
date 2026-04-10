@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   createComparisonRun,
   listEvaluationCases,
+  listItermSessions,
   listWindowBindings,
   startComparisonRun,
 } from "../../../lib/tauri";
@@ -28,10 +29,17 @@ export function CreateRunPage() {
     queryKey: ["window-bindings"],
     queryFn: listWindowBindings,
   });
+  const sessionsQuery = useQuery({
+    queryKey: ["iterm-sessions"],
+    queryFn: listItermSessions,
+  });
   const createRunMutation = useMutation({
-    mutationFn: createComparisonRun,
-    onSuccess: async (run) => {
+    mutationFn: async (input: CreateComparisonRunInput) => {
+      const run = await createComparisonRun(input);
       await startComparisonRun(run.id);
+      return run;
+    },
+    onSuccess: async (run) => {
       await navigate(`/runs/${run.id}`);
     },
   });
@@ -45,11 +53,26 @@ export function CreateRunPage() {
     );
   }, [draft, createRunMutation.isPending]);
 
+  const onlineSessionIds = useMemo(() => {
+    return new Set((sessionsQuery.data ?? []).map((session) => session.session_id));
+  }, [sessionsQuery.data]);
+
+  const bindingOptions = useMemo(() => {
+    return (bindingsQuery.data ?? []).map((binding) => {
+      const isOnline = onlineSessionIds.has(binding.iterm_session_id);
+      return {
+        ...binding,
+        isOnline,
+        label: `${binding.display_name} (${binding.iterm_session_id}) ${isOnline ? "在线" : "离线"}`,
+      };
+    });
+  }, [bindingsQuery.data, onlineSessionIds]);
+
   return (
     <section className="page stack-block">
       <header className="section-header">
-        <h2>Create Run</h2>
-        <p>Select an evaluation case and target windows to prepare a comparison run.</p>
+        <h2>创建运行任务</h2>
+        <p>选择评测案例和在线目标窗口，准备一次对比运行。</p>
       </header>
 
       <form
@@ -66,19 +89,19 @@ export function CreateRunPage() {
         }}
       >
         <label className="field">
-          <span>Run title</span>
+          <span>任务标题</span>
           <input
             value={draft.title}
             onChange={(event) => {
               setDraft((current) => ({ ...current, title: event.target.value }));
             }}
-            placeholder="Legacy parser benchmark - batch A"
+            placeholder="旧代码解析基准测试 - A 组"
             required
           />
         </label>
 
         <label className="field">
-          <span>Evaluation case</span>
+          <span>评测案例</span>
           <select
             value={draft.evaluation_case_id}
             onChange={(event) => {
@@ -86,7 +109,7 @@ export function CreateRunPage() {
             }}
             required
           >
-            <option value="">Select a saved case</option>
+            <option value="">请选择已保存案例</option>
             {(casesQuery.data ?? []).map((item) => (
               <option key={item.id} value={item.id}>
                 {item.title}
@@ -96,7 +119,7 @@ export function CreateRunPage() {
         </label>
 
         <label className="field">
-          <span>Target bindings (multi-select)</span>
+          <span>目标绑定（可多选）</span>
           <select
             multiple
             size={Math.max(4, (bindingsQuery.data ?? []).length || 4)}
@@ -115,38 +138,42 @@ export function CreateRunPage() {
             }}
             required
           >
-            {(bindingsQuery.data ?? []).map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.display_name} ({item.iterm_session_id})
+            {bindingOptions.map((item) => (
+              <option disabled={!item.isOnline} key={item.id} value={item.id}>
+                {item.label}
               </option>
             ))}
           </select>
         </label>
+        <p className="muted">离线窗口会被禁用；如需刷新窗口状态，请先到目标配置页刷新会话。</p>
 
         <label className="field">
-          <span>Run notes</span>
+          <span>运行备注</span>
           <textarea
             rows={4}
             value={draft.notes ?? ""}
             onChange={(event) => {
               setDraft((current) => ({ ...current, notes: event.target.value }));
             }}
-            placeholder="Why are we running this comparison?"
+            placeholder="这次对比运行希望验证什么？"
           />
         </label>
 
         {casesQuery.isError ? (
-          <p className="error-text">Failed to load cases. {String(casesQuery.error)}</p>
+          <p className="error-text">加载案例失败。{String(casesQuery.error)}</p>
         ) : null}
         {bindingsQuery.isError ? (
-          <p className="error-text">Failed to load bindings. {String(bindingsQuery.error)}</p>
+          <p className="error-text">加载绑定失败。{String(bindingsQuery.error)}</p>
+        ) : null}
+        {sessionsQuery.isError ? (
+          <p className="error-text">加载 iTerm2 会话失败。{String(sessionsQuery.error)}</p>
         ) : null}
         {createRunMutation.isError ? (
-          <p className="error-text">Failed to create run. {String(createRunMutation.error)}</p>
+          <p className="error-text">创建或启动运行任务失败。{String(createRunMutation.error)}</p>
         ) : null}
 
         <button className="primary-btn" disabled={!canSubmit} type="submit">
-          {createRunMutation.isPending ? "Starting..." : "Start run"}
+          {createRunMutation.isPending ? "启动中..." : "开始运行"}
         </button>
       </form>
     </section>

@@ -1,10 +1,10 @@
 const headers = [
-  "Model",
+  "模型",
   "Pass@1",
-  "Unit test rate",
-  "Latency",
-  "Token cost",
-  "Overall score",
+  "单测通过率",
+  "耗时",
+  "Token 成本",
+  "综合评分",
 ];
 
 export type MetricRow = {

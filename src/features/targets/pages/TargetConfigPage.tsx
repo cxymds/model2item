@@ -5,6 +5,7 @@ import {
   listItermSessions,
   listProfiles,
   listWindowBindings,
+  refreshWindowBindingPresence,
 } from "../../../lib/tauri";
 import { formatDateTime } from "../../../lib/formatters";
 import { ProfileForm } from "../components/ProfileForm";
@@ -38,17 +39,26 @@ export function TargetConfigPage() {
       await queryClient.invalidateQueries({ queryKey: ["window-bindings"] });
     },
   });
+  const refreshPresenceMutation = useMutation({
+    mutationFn: refreshWindowBindingPresence,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["window-bindings"] }),
+        queryClient.invalidateQueries({ queryKey: ["iterm-sessions"] }),
+      ]);
+    },
+  });
 
   return (
     <section className="page stack-block">
       <header className="section-header">
-        <h2>Target Configuration</h2>
-        <p>Bind iTerm2 sessions to model profiles with independent keys and base URLs.</p>
+        <h2>目标配置</h2>
+        <p>将 iTerm2 会话绑定到不同模型配置，并使用各自独立的密钥与基础地址。</p>
       </header>
 
       <div className="three-col">
         <div className="panel">
-          <h3>Create profile</h3>
+          <h3>创建配置</h3>
           <ProfileForm
             isPending={createProfileMutation.isPending}
             onSubmit={(input) => {
@@ -58,13 +68,13 @@ export function TargetConfigPage() {
         </div>
 
         <div className="panel">
-          <h3>Profiles</h3>
-          {profilesQuery.isLoading ? <p className="muted">Loading profiles...</p> : null}
+          <h3>模型配置</h3>
+          {profilesQuery.isLoading ? <p className="muted">正在加载配置...</p> : null}
           {profilesQuery.isError ? (
-            <p className="error-text">Failed to load profiles. {String(profilesQuery.error)}</p>
+            <p className="error-text">加载配置失败。{String(profilesQuery.error)}</p>
           ) : null}
           {profilesQuery.data && profilesQuery.data.length === 0 ? (
-            <p className="muted">No model profiles yet.</p>
+            <p className="muted">还没有模型配置。</p>
           ) : null}
           {profilesQuery.data ? (
             <ul className="card-list">
@@ -75,7 +85,7 @@ export function TargetConfigPage() {
                     {profile.provider} / {profile.model_name}
                   </span>
                   <span>{profile.base_url}</span>
-                  <span>Updated: {formatDateTime(profile.updated_at)}</span>
+                  <span>更新时间：{formatDateTime(profile.updated_at)}</span>
                 </li>
               ))}
             </ul>
@@ -83,21 +93,21 @@ export function TargetConfigPage() {
         </div>
 
         <div className="panel">
-          <h3>Window bindings</h3>
+          <h3>窗口绑定</h3>
           {bindingsQuery.isError ? (
-            <p className="error-text">Failed to load bindings. {String(bindingsQuery.error)}</p>
+            <p className="error-text">加载绑定失败。{String(bindingsQuery.error)}</p>
           ) : null}
           {sessionsQuery.isError ? (
-            <p className="error-text">Failed to discover iTerm sessions. {String(sessionsQuery.error)}</p>
+            <p className="error-text">发现 iTerm 会话失败。{String(sessionsQuery.error)}</p>
           ) : null}
           <WindowBindingList
             bindings={bindingsQuery.data ?? []}
             sessions={sessionsQuery.data ?? []}
             profiles={profilesQuery.data ?? []}
             isPending={createBindingMutation.isPending}
-            isRefreshingSessions={sessionsQuery.isFetching}
+            isRefreshingSessions={sessionsQuery.isFetching || refreshPresenceMutation.isPending}
             onRefreshSessions={() => {
-              void sessionsQuery.refetch();
+              refreshPresenceMutation.mutate();
             }}
             onCreate={(input) => {
               createBindingMutation.mutate(input);

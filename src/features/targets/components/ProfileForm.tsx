@@ -28,19 +28,19 @@ export function ProfileForm({ isPending, onSubmit }: ProfileFormProps) {
       }}
     >
       <label className="field">
-        <span>Name</span>
+        <span>名称</span>
         <input
           value={form.name}
           onChange={(event) => {
             setForm((current) => ({ ...current, name: event.target.value }));
           }}
-          placeholder="GPT-5.4 baseline"
+          placeholder="GPT-5.4 基线"
           required
         />
       </label>
 
       <label className="field">
-        <span>Provider</span>
+        <span>提供方</span>
         <input
           value={form.provider}
           onChange={(event) => {
@@ -52,7 +52,7 @@ export function ProfileForm({ isPending, onSubmit }: ProfileFormProps) {
       </label>
 
       <label className="field">
-        <span>Model name</span>
+        <span>模型名称</span>
         <input
           value={form.model_name}
           onChange={(event) => {
@@ -64,7 +64,7 @@ export function ProfileForm({ isPending, onSubmit }: ProfileFormProps) {
       </label>
 
       <label className="field">
-        <span>Base URL</span>
+        <span>基础地址</span>
         <input
           type="url"
           value={form.base_url}
@@ -90,7 +90,7 @@ export function ProfileForm({ isPending, onSubmit }: ProfileFormProps) {
       </label>
 
       <button className="primary-btn" disabled={isPending} type="submit">
-        {isPending ? "Saving..." : "Create profile"}
+        {isPending ? "保存中..." : "创建配置"}
       </button>
     </form>
   );

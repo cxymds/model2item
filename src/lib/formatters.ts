@@ -1,5 +1,5 @@
 export function formatDateTime(value: string | null) {
-  if (!value) return "N/A";
+  if (!value) return "暂无";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
@@ -19,7 +19,7 @@ export function parseJsonSafe<T>(value: string): T | null {
 }
 
 export function formatDurationMs(value: number | null) {
-  if (value === null || Number.isNaN(value)) return "N/A";
+  if (value === null || Number.isNaN(value)) return "暂无";
   if (value < 1000) return `${value}ms`;
   return `${(value / 1000).toFixed(2)}s`;
 }

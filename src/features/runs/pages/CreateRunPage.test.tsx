@@ -29,6 +29,25 @@ vi.mock("../../../lib/tauri", () => {
         last_seen_at: null,
         metadata_json: "{}",
       },
+      {
+        id: "binding-2",
+        iterm_session_id: "session-2",
+        display_name: "Window B",
+        profile_id: "profile-1",
+        enabled: 1,
+        last_seen_at: null,
+        metadata_json: "{}",
+      },
+    ]),
+    listItermSessions: vi.fn().mockResolvedValue([
+      {
+        session_id: "session-1",
+        window_id: "window-1",
+        window_title: "Project A",
+        tab_id: "tab-1",
+        tab_title: "Compare",
+        session_title: "Pane 1",
+      },
     ]),
     createComparisonRun: vi.fn().mockResolvedValue({
       id: "run-1",
@@ -63,11 +82,17 @@ function renderPage() {
 }
 
 describe("CreateRunPage", () => {
-  it("renders a runnable draft form with run title field", async () => {
+  it("renders online bindings and disables offline ones", async () => {
     renderPage();
-    expect(await screen.findByLabelText("Run title")).toBeInTheDocument();
+
+    expect(await screen.findByLabelText("任务标题")).toBeInTheDocument();
     expect(await screen.findByRole("option", { name: "Legacy parser walkthrough" })).toBeInTheDocument();
-    await screen.findByRole("option", { name: /Window A/ });
-    expect(screen.getByRole("button", { name: "Start run" })).toBeInTheDocument();
+    const onlineOption = await screen.findByRole("option", { name: /Window A .*在线/ });
+    const offlineOption = await screen.findByRole("option", { name: /Window B .*离线/ });
+
+    expect(onlineOption).not.toBeDisabled();
+    expect(offlineOption).toBeDisabled();
+    expect(screen.getByText(/离线窗口会被禁用/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "开始运行" })).toBeInTheDocument();
   });
 });

@@ -20,13 +20,13 @@ export function CaseLibraryPage() {
   return (
     <section className="page stack-block">
       <header className="section-header">
-        <h2>Case Library</h2>
-        <p>Create reusable old-code understanding prompts and re-run them across model targets.</p>
+        <h2>案例库</h2>
+        <p>创建可复用的旧代码理解提示词，并在多个模型目标之间重复运行。</p>
       </header>
 
       <div className="two-col">
         <div className="panel">
-          <h3>Create case</h3>
+          <h3>创建案例</h3>
           <CaseForm
             isPending={createCaseMutation.isPending}
             onSubmit={(input) => {
@@ -36,13 +36,13 @@ export function CaseLibraryPage() {
         </div>
 
         <div className="panel">
-          <h3>Saved cases</h3>
-          {casesQuery.isLoading ? <p className="muted">Loading cases...</p> : null}
+          <h3>已保存案例</h3>
+          {casesQuery.isLoading ? <p className="muted">正在加载案例...</p> : null}
           {casesQuery.isError ? (
-            <p className="error-text">Failed to load cases. {String(casesQuery.error)}</p>
+            <p className="error-text">加载案例失败。{String(casesQuery.error)}</p>
           ) : null}
           {casesQuery.data && casesQuery.data.length === 0 ? (
-            <p className="muted">No evaluation cases yet.</p>
+            <p className="muted">还没有评测案例。</p>
           ) : null}
           {casesQuery.data ? (
             <ul className="card-list">
@@ -50,7 +50,7 @@ export function CaseLibraryPage() {
                 <li className="data-card" key={item.id}>
                   <strong>{item.title}</strong>
                   <p>{item.prompt.slice(0, 160)}...</p>
-                  <span>Created: {formatDateTime(item.created_at)}</span>
+                  <span>创建时间：{formatDateTime(item.created_at)}</span>
                 </li>
               ))}
             </ul>

@@ -12,9 +12,9 @@ describe("AppShell", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("Runs")).toBeInTheDocument();
-    expect(screen.getByText("Cases")).toBeInTheDocument();
-    expect(screen.getByText("Targets")).toBeInTheDocument();
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.getByText("运行任务")).toBeInTheDocument();
+    expect(screen.getByText("案例库")).toBeInTheDocument();
+    expect(screen.getByText("目标配置")).toBeInTheDocument();
+    expect(screen.getByText("设置")).toBeInTheDocument();
   });
 });

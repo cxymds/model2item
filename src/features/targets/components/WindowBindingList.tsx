@@ -43,6 +43,10 @@ export function WindowBindingList({
     }));
   }, [sessions]);
 
+  const onlineSessionIds = useMemo(() => {
+    return new Set(sessionOptions.map((session) => session.session_id));
+  }, [sessionOptions]);
+
   return (
     <div className="stack-block">
       <form
@@ -59,7 +63,7 @@ export function WindowBindingList({
         }}
       >
         <label className="field">
-          <span>Discovered sessions</span>
+          <span>已发现会话</span>
           <select
             value={form.iterm_session_id}
             onChange={(event) => {
@@ -76,7 +80,7 @@ export function WindowBindingList({
               }));
             }}
           >
-            <option value="">Select discovered session</option>
+            <option value="">请选择已发现会话</option>
             {sessionOptions.map((session) => (
               <option key={session.session_id} value={session.session_id}>
                 {session.label}
@@ -86,7 +90,7 @@ export function WindowBindingList({
         </label>
 
         <label className="field">
-          <span>Session id</span>
+          <span>会话 ID</span>
           <input
             value={form.iterm_session_id}
             onChange={(event) => {
@@ -98,19 +102,19 @@ export function WindowBindingList({
         </label>
 
         <label className="field">
-          <span>Display name</span>
+          <span>显示名称</span>
           <input
             value={form.display_name}
             onChange={(event) => {
               setForm((current) => ({ ...current, display_name: event.target.value }));
             }}
-            placeholder="Window A - GPT baseline"
+            placeholder="窗口 A - GPT 基线"
             required
           />
         </label>
 
         <label className="field">
-          <span>Bound profile</span>
+          <span>绑定配置</span>
           <select
             value={form.profile_id}
             onChange={(event) => {
@@ -118,7 +122,7 @@ export function WindowBindingList({
             }}
             required
           >
-            <option value="">Select profile</option>
+            <option value="">请选择配置</option>
             {profiles.map((profile) => (
               <option key={profile.id} value={profile.id}>
                 {profile.name} ({profile.model_name})
@@ -128,17 +132,17 @@ export function WindowBindingList({
         </label>
 
         <button className="primary-btn" disabled={isPending || profiles.length === 0} type="submit">
-          {isPending ? "Binding..." : "Create binding"}
+          {isPending ? "绑定中..." : "创建绑定"}
         </button>
         <button className="ghost-btn" disabled={isRefreshingSessions} onClick={onRefreshSessions} type="button">
-          {isRefreshingSessions ? "Refreshing..." : "Refresh sessions"}
+          {isRefreshingSessions ? "刷新中..." : "刷新会话"}
         </button>
       </form>
 
       <div className="list-block">
-        <h3>Discovered sessions</h3>
+        <h3>已发现会话</h3>
         {sessionOptions.length === 0 ? (
-          <p className="muted">No iTerm2 sessions discovered yet. Open iTerm2 and refresh.</p>
+          <p className="muted">尚未发现 iTerm2 会话，请打开 iTerm2 后刷新。</p>
         ) : (
           <ul className="card-list">
             {sessionOptions.map((session) => (
@@ -146,7 +150,7 @@ export function WindowBindingList({
                 <strong>{session.window_title}</strong>
                 <span>{session.tab_title}</span>
                 <span>{session.session_title}</span>
-                <span>Session: {session.session_id}</span>
+                <span>会话：{session.session_id}</span>
               </li>
             ))}
           </ul>
@@ -154,23 +158,25 @@ export function WindowBindingList({
       </div>
 
       <div className="list-block">
-        <h3>Current bindings</h3>
+        <h3>当前绑定</h3>
         {bindings.length === 0 ? (
-          <p className="muted">No bindings yet. Create one above.</p>
+          <p className="muted">还没有绑定，请先在上方创建。</p>
         ) : (
           <ul className="card-list">
             {bindings.map((binding) => {
               const profile = profileMap.get(binding.profile_id);
+              const isOnline = onlineSessionIds.has(binding.iterm_session_id);
               return (
                 <li className="data-card" key={binding.id}>
                   <strong>{binding.display_name}</strong>
-                  <span>Session: {binding.iterm_session_id}</span>
+                  <span>会话：{binding.iterm_session_id}</span>
                   <span>
-                    Profile:{" "}
-                    {profile ? `${profile.name} (${profile.model_name})` : `Unknown ${shortenId(binding.profile_id)}`}
+                    配置：
+                    {profile ? `${profile.name} (${profile.model_name})` : `未知配置 ${shortenId(binding.profile_id)}`}
                   </span>
-                  <span>Status: {binding.enabled === 1 ? "Enabled" : "Disabled"}</span>
-                  <span>Last seen: {formatDateTime(binding.last_seen_at)}</span>
+                  <span>启用状态：{binding.enabled === 1 ? "已启用" : "已禁用"}</span>
+                  <span>连接状态：{isOnline ? "在线" : "离线"}</span>
+                  <span>最近在线：{formatDateTime(binding.last_seen_at)}</span>
                 </li>
               );
             })}

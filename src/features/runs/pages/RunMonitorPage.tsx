@@ -24,11 +24,11 @@ export function RunMonitorPage() {
   return (
     <section className="page stack-block">
       <header className="section-header">
-        <h2>Run Monitor</h2>
+        <h2>运行监控</h2>
         <p>
           {runQuery.data
-            ? `${runQuery.data.title} (${runQuery.data.status})`
-            : `Run ID: ${normalizedRunId || "Unknown"}`}
+            ? `${runQuery.data.title}（${runQuery.data.status}）`
+            : `运行 ID：${normalizedRunId || "未知"}`}
         </p>
         {runQuery.data?.status === "queued" ? (
           <button
@@ -39,18 +39,18 @@ export function RunMonitorPage() {
             }}
             type="button"
           >
-            {startRunMutation.isPending ? "Starting execution..." : "Start execution"}
+            {startRunMutation.isPending ? "启动执行中..." : "开始执行"}
           </button>
         ) : null}
       </header>
 
-      {runQuery.isLoading || targetsQuery.isLoading ? <p className="muted">Loading run state...</p> : null}
-      {runQuery.isError ? <p className="error-text">Failed to load run. {String(runQuery.error)}</p> : null}
+      {runQuery.isLoading || targetsQuery.isLoading ? <p className="muted">正在加载运行状态...</p> : null}
+      {runQuery.isError ? <p className="error-text">加载运行任务失败。{String(runQuery.error)}</p> : null}
       {targetsQuery.isError ? (
-        <p className="error-text">Failed to load targets. {String(targetsQuery.error)}</p>
+        <p className="error-text">加载目标失败。{String(targetsQuery.error)}</p>
       ) : null}
       {startRunMutation.isError ? (
-        <p className="error-text">Failed to start execution. {String(startRunMutation.error)}</p>
+        <p className="error-text">启动执行失败。{String(startRunMutation.error)}</p>
       ) : null}
 
       <div className="status-grid">
@@ -59,13 +59,13 @@ export function RunMonitorPage() {
             key={target.id}
             status={target.status}
             title={target.label}
-            subtitle={`Target ${target.id} currently ${target.statusText}`}
+            subtitle={`目标 ${target.id} 当前${target.statusText}`}
           />
         ))}
       </div>
 
       {targetsQuery.data && targetsQuery.data.length === 0 ? (
-        <p className="muted">No targets found for this run yet.</p>
+        <p className="muted">当前运行任务还没有目标。</p>
       ) : null}
     </section>
   );

@@ -2,10 +2,10 @@ import type { PropsWithChildren } from "react";
 import { NavLink } from "react-router-dom";
 
 const navItems = [
-  { to: "/runs/new", label: "Runs" },
-  { to: "/cases", label: "Cases" },
-  { to: "/targets", label: "Targets" },
-  { to: "/settings", label: "Settings" }
+  { to: "/runs/new", label: "运行任务" },
+  { to: "/cases", label: "案例库" },
+  { to: "/targets", label: "目标配置" },
+  { to: "/settings", label: "设置" }
 ];
 
 export function AppShell({ children }: PropsWithChildren) {
@@ -13,8 +13,8 @@ export function AppShell({ children }: PropsWithChildren) {
     <div className="app-shell">
       <aside className="sidebar">
         <div>
-          <p className="eyebrow">Workbench</p>
-          <h1>iTerm MCP Tools</h1>
+          <p className="eyebrow">评测工作台</p>
+          <h1>iTerm MCP 工具</h1>
         </div>
         <nav className="nav-list">
           {navItems.map((item) => (

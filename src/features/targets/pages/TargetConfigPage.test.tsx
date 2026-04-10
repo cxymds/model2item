@@ -22,7 +22,26 @@ vi.mock("../../../lib/tauri", () => {
         updated_at: "2026-01-01T00:00:00Z",
       },
     ]),
-    listWindowBindings: vi.fn().mockResolvedValue([]),
+    listWindowBindings: vi.fn().mockResolvedValue([
+      {
+        id: "binding-1",
+        iterm_session_id: "session-1",
+        display_name: "Window A",
+        profile_id: "profile-1",
+        enabled: 1,
+        last_seen_at: "2026-01-01T00:00:00Z",
+        metadata_json: "{}",
+      },
+      {
+        id: "binding-2",
+        iterm_session_id: "session-offline",
+        display_name: "Window B",
+        profile_id: "profile-1",
+        enabled: 1,
+        last_seen_at: null,
+        metadata_json: "{}",
+      },
+    ]),
     listItermSessions: vi.fn().mockResolvedValue([
       {
         session_id: "session-1",
@@ -33,6 +52,7 @@ vi.mock("../../../lib/tauri", () => {
         session_title: "Pane 1",
       },
     ]),
+    refreshWindowBindingPresence: vi.fn().mockResolvedValue([]),
   };
 });
 
@@ -54,8 +74,10 @@ describe("TargetConfigPage", () => {
   it("renders discovered iTerm sessions in the binding form", async () => {
     renderPage();
 
-    expect((await screen.findAllByText("Discovered sessions")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("已发现会话")).length).toBeGreaterThan(0);
     expect(await screen.findByRole("option", { name: /Project A \/ GPT Compare \/ Pane 1/ })).toBeInTheDocument();
     expect(screen.getByText("Project A")).toBeInTheDocument();
+    expect(screen.getByText("连接状态：在线")).toBeInTheDocument();
+    expect(screen.getByText("连接状态：离线")).toBeInTheDocument();
   });
 });

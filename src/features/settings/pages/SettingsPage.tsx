@@ -2,30 +2,30 @@ export function SettingsPage() {
   return (
     <section className="page stack-block">
       <header className="section-header">
-        <h2>Settings</h2>
-        <p>Runtime defaults for local evaluation runs. Save wiring can be added in a later phase.</p>
+        <h2>设置</h2>
+        <p>本地评测运行的默认参数设置，后续阶段可补充持久化保存能力。</p>
       </header>
 
       <div className="two-col">
         <div className="panel">
-          <h3>Execution defaults</h3>
+          <h3>执行默认值</h3>
           <label className="field">
-            <span>Default timeout (ms)</span>
+            <span>默认超时时间（毫秒）</span>
             <input defaultValue="30000" type="number" />
           </label>
           <label className="field">
-            <span>Max concurrency</span>
+            <span>最大并发数</span>
             <input defaultValue="3" type="number" />
           </label>
         </div>
         <div className="panel">
-          <h3>Storage and reports</h3>
+          <h3>存储与报告</h3>
           <label className="field">
-            <span>Database location</span>
+            <span>数据库位置</span>
             <input defaultValue="./workbench.db" />
           </label>
           <label className="field">
-            <span>Default export format</span>
+            <span>默认导出格式</span>
             <select defaultValue="csv">
               <option value="csv">CSV</option>
               <option value="json">JSON</option>

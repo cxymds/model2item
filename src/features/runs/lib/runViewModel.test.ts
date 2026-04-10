@@ -25,7 +25,7 @@ describe("runViewModel", () => {
 
     const vm = buildRunTargetViewModel(target);
     expect(vm.label).toBe("openai / gpt-5.4");
-    expect(vm.summary).toContain("status=queued");
+    expect(vm.summary).toContain("状态：排队中");
     expect(vm.status).toBe("queued");
   });
 
@@ -54,6 +54,6 @@ describe("runViewModel", () => {
     };
 
     const vm = buildRunTargetViewModel(target);
-    expect(vm.label).toBe("Target target...1234");
+    expect(vm.label).toBe("目标 target...1234");
   });
 });

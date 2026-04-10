@@ -27,7 +27,7 @@ export function CaseForm({ isPending, onSubmit }: CaseFormProps) {
           JSON.parse(form.context_payload);
           setJsonError("");
         } catch {
-          setJsonError("Context payload must be valid JSON.");
+          setJsonError("上下文载荷必须是合法的 JSON。");
           return;
         }
         onSubmit({
@@ -38,32 +38,32 @@ export function CaseForm({ isPending, onSubmit }: CaseFormProps) {
       }}
     >
       <label className="field">
-        <span>Case title</span>
+        <span>案例标题</span>
         <input
           value={form.title}
           onChange={(event) => {
             setForm((current) => ({ ...current, title: event.target.value }));
           }}
-          placeholder="Legacy parser walkthrough"
+          placeholder="旧版解析器走查"
           required
         />
       </label>
 
       <label className="field">
-        <span>Full prompt</span>
+        <span>完整提示词</span>
         <textarea
           value={form.prompt}
           onChange={(event) => {
             setForm((current) => ({ ...current, prompt: event.target.value }));
           }}
           rows={7}
-          placeholder="Analyze this old codebase module and explain..."
+          placeholder="分析这个旧代码模块并说明其实现逻辑..."
           required
         />
       </label>
 
       <label className="field">
-        <span>Context payload (JSON string)</span>
+        <span>上下文载荷（JSON 字符串）</span>
         <textarea
           value={form.context_payload}
           onChange={(event) => {
@@ -76,19 +76,19 @@ export function CaseForm({ isPending, onSubmit }: CaseFormProps) {
       {jsonError ? <p className="error-text">{jsonError}</p> : null}
 
       <label className="field">
-        <span>Notes</span>
+        <span>备注</span>
         <textarea
           value={form.notes ?? ""}
           onChange={(event) => {
             setForm((current) => ({ ...current, notes: event.target.value }));
           }}
           rows={3}
-          placeholder="What should reviewers pay attention to?"
+          placeholder="希望评审重点关注什么？"
         />
       </label>
 
       <button className="primary-btn" disabled={isPending} type="submit">
-        {isPending ? "Saving..." : "Save evaluation case"}
+        {isPending ? "保存中..." : "保存评测案例"}
       </button>
     </form>
   );

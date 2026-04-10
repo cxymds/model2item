@@ -9,6 +9,20 @@ import {
   toMetricRows,
 } from "../lib/runViewModel";
 
+function buildSummaryText(
+  runId: string,
+  targets: Array<{ target_id: string; label: string }>,
+  fastestTargetId: string | null,
+  longestTargetId: string | null,
+  queuedCount: number,
+) {
+  if (targets.length === 0) return "当前运行任务尚未采集到结果目标。";
+
+  const labelById = new Map(targets.map((item) => [item.target_id, item.label]));
+
+  return `最快目标：${labelById.get(fastestTargetId ?? "") ?? "暂无"}；最长输出：${labelById.get(longestTargetId ?? "") ?? "暂无"}；排队中目标数：${queuedCount}；运行 ID：${runId || "未知"}`;
+}
+
 export function RunResultsPage() {
   const { runId } = useParams();
   const normalizedRunId = runId ?? "";
@@ -18,26 +32,36 @@ export function RunResultsPage() {
   return (
     <section className="page stack-block">
       <header className="section-header">
-        <h2>Run Results</h2>
+        <h2>运行结果</h2>
         <p>
           {summaryQuery.data
-            ? `Result comparison for ${summaryQuery.data.run.title} (${summaryQuery.data.run.status})`
-            : `Side-by-side comparison workspace for run: ${normalizedRunId || "Unknown"}`}
+            ? `${summaryQuery.data.run.title} 的结果对比（${summaryQuery.data.run.status}）`
+            : `运行任务 ${normalizedRunId || "未知"} 的并排对比视图`}
         </p>
       </header>
 
-      {summaryQuery.isLoading ? <p className="muted">Loading run results...</p> : null}
+      {summaryQuery.isLoading ? <p className="muted">正在加载运行结果...</p> : null}
       {summaryQuery.isError ? (
-        <p className="error-text">Failed to load summary. {String(summaryQuery.error)}</p>
+        <p className="error-text">加载汇总结果失败。{String(summaryQuery.error)}</p>
       ) : null}
 
       <ResultComparisonGrid columns={toComparisonColumns(targetViewModels)} />
 
       <MetricTable rows={toMetricRows(targetViewModels)} />
 
-      {summaryQuery.data ? <p className="muted">{summaryQuery.data.summary_text}</p> : null}
+      {summaryQuery.data ? (
+        <p className="muted">
+          {buildSummaryText(
+            normalizedRunId,
+            summaryQuery.data.targets,
+            summaryQuery.data.fastest_target_id,
+            summaryQuery.data.longest_target_id,
+            summaryQuery.data.queued_count,
+          )}
+        </p>
+      ) : null}
 
-      {targetViewModels.length === 0 ? <p className="muted">No result targets captured for this run.</p> : null}
+      {targetViewModels.length === 0 ? <p className="muted">当前运行任务尚未采集到结果目标。</p> : null}
     </section>
   );
 }

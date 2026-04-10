@@ -54,6 +54,7 @@ describe("RunResultsPage", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText(/fastest=openai/i)).toBeInTheDocument();
+    expect(await screen.findByText("运行结果")).toBeInTheDocument();
+    expect(await screen.findByText(/最快目标：openai \/ gpt-5.4/)).toBeInTheDocument();
   });
 });
