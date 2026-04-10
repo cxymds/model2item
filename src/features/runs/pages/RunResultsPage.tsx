@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { MetricTable } from "../components/MetricTable";
 import { ResultComparisonGrid } from "../components/ResultComparisonGrid";
 import { comparisonSummaryQuery } from "../lib/runQueries";
+import { saveRecentRun } from "../lib/recentRun";
 import {
   buildRunTargetViewModelsFromSummary,
   toComparisonColumns,
@@ -28,6 +30,16 @@ export function RunResultsPage() {
   const normalizedRunId = runId ?? "";
   const summaryQuery = useQuery(comparisonSummaryQuery(normalizedRunId));
   const targetViewModels = buildRunTargetViewModelsFromSummary(summaryQuery.data?.targets ?? []);
+
+  useEffect(() => {
+    if (!summaryQuery.data) return;
+
+    saveRecentRun({
+      id: summaryQuery.data.run.id,
+      title: summaryQuery.data.run.title,
+      status: summaryQuery.data.run.status,
+    });
+  }, [summaryQuery.data]);
 
   return (
     <section className="page stack-block">

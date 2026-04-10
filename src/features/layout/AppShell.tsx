@@ -1,5 +1,6 @@
 import type { PropsWithChildren } from "react";
 import { NavLink } from "react-router-dom";
+import { getRecentRunHref, getRecentRunLabel, useRecentRun } from "../runs/lib/recentRun";
 
 const navItems = [
   { to: "/runs/new", label: "运行任务" },
@@ -9,6 +10,8 @@ const navItems = [
 ];
 
 export function AppShell({ children }: PropsWithChildren) {
+  const recentRun = useRecentRun();
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -26,6 +29,17 @@ export function AppShell({ children }: PropsWithChildren) {
               {item.label}
             </NavLink>
           ))}
+          {recentRun ? (
+            <NavLink
+              aria-label={getRecentRunLabel(recentRun.status)}
+              to={getRecentRunHref(recentRun)}
+              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+            >
+              {getRecentRunLabel(recentRun.status)}
+              <br />
+              {recentRun.title}
+            </NavLink>
+          ) : null}
         </nav>
       </aside>
       <main className="content">{children}</main>

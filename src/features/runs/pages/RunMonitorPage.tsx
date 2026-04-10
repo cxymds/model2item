@@ -1,6 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { startComparisonRun } from "../../../lib/tauri";
+import { saveRecentRun } from "../lib/recentRun";
 import { RunTargetStatusCard } from "../components/RunTargetStatusCard";
 import { comparisonRunQuery, comparisonTargetsQuery } from "../lib/runQueries";
 import { buildRunTargetViewModels } from "../lib/runViewModel";
@@ -20,6 +22,16 @@ export function RunMonitorPage() {
     mutationFn: startComparisonRun,
   });
   const targetViewModels = buildRunTargetViewModels(targetsQuery.data ?? []);
+
+  useEffect(() => {
+    if (!runQuery.data) return;
+
+    saveRecentRun({
+      id: runQuery.data.id,
+      title: runQuery.data.title,
+      status: runQuery.data.status,
+    });
+  }, [runQuery.data]);
 
   return (
     <section className="page stack-block">
