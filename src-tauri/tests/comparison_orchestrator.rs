@@ -20,7 +20,7 @@ use iterm_mcp_tools_lib::{
             ItermExecutionRequest, ItermExecutionResult, ItermMcpAdapter, ItermSessionInfo,
         },
         profile_service::ProfileService,
-        secret_store::MemorySecretStore,
+        secret_store::{MemorySecretStore, SecretStore},
         window_binding_service::WindowBindingService,
     },
 };
@@ -526,6 +526,69 @@ async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
             .unwrap_or_default()
             >= 3
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn surfaces_profile_and_target_when_secret_is_missing_at_startup(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let orchestrator = ComparisonOrchestrator::with_dependencies(
+        pool.clone(),
+        secret_store.clone(),
+        FakeAdapter::default(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude Missing Secret".to_string(),
+            provider: "anthropic".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    secret_store.delete_secret(&profile.api_key_encrypted)?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Missing secret case".to_string(),
+            prompt: "Summarize the core control flow".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-ok".to_string(),
+            display_name: "Window Missing Secret".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Missing secret run".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    let result = orchestrator.validate_run_startup(&run.id).await;
+    let error_message = result.err().map(|error| error.to_string()).unwrap_or_default();
+
+    assert!(error_message.contains("profile `Claude Missing Secret`"));
+    assert!(error_message.contains("target `Window Missing Secret`"));
+    assert!(error_message.contains("re-save the API key"));
 
     Ok(())
 }

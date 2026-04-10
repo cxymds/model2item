@@ -182,6 +182,26 @@ describe("TargetConfigPage", () => {
     });
   });
 
+  it("keeps the existing api key when saving profile changes with an empty key field", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑配置 GPT-5.4 baseline" }));
+    fireEvent.change(screen.getByDisplayValue("gpt-5.4"), {
+      target: { value: "gpt-5.4-turbo" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(updateProfile).toHaveBeenCalledWith("profile-1", {
+        name: "GPT-5.4 baseline",
+        provider: "openai",
+        model_name: "gpt-5.4-turbo",
+        base_url: "https://api.example.com/v1",
+        api_key: "",
+      });
+    });
+  });
+
   it("deletes an unused profile", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     renderPage();

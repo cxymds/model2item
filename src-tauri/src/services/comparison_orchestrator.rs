@@ -35,6 +35,30 @@ impl ComparisonOrchestrator<PythonItermMcpAdapter> {
 }
 
 impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
+    fn map_secret_lookup_error(
+        target_display_name: &str,
+        profile_name: &str,
+        error: AppError,
+    ) -> AppError {
+        match error {
+            AppError::SecretStore(message)
+                if message.contains("No matching entry found in secure storage") =>
+            {
+                AppError::InvalidInput(format!(
+                    "cannot start target `{target_display_name}` because profile `{profile_name}` is missing its saved API key in secure storage. Open that profile and re-save the API key, then try again."
+                ))
+            }
+            AppError::MissingDependency(message)
+                if message.contains("secret not found for locator") =>
+            {
+                AppError::InvalidInput(format!(
+                    "cannot start target `{target_display_name}` because profile `{profile_name}` is missing its saved API key in secure storage. Open that profile and re-save the API key, then try again."
+                ))
+            }
+            other => other,
+        }
+    }
+
     async fn read_screen_text(&self, session_id: &str) -> Result<String, AppError> {
         self.adapter
             .get_screen_text(session_id)
@@ -124,7 +148,12 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
         self.ensure_targets_online(&targets).await?;
 
         for target in targets {
-            let api_key = self.secret_store.get_secret(&target.api_key_locator)?;
+            let api_key = self
+                .secret_store
+                .get_secret(&target.api_key_locator)
+                .map_err(|error| {
+                    Self::map_secret_lookup_error(&target.display_name, &target.profile_name, error)
+                })?;
             let request = ItermExecutionRequest {
                 request_id: target.target_id,
                 session_id: target.iterm_session_id,
@@ -268,7 +297,12 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             .store_target_message(&target.target_id, "user", &request_prompt, "prompt")
             .await?;
 
-        let api_key = self.secret_store.get_secret(&target.api_key_locator)?;
+        let api_key = self
+            .secret_store
+            .get_secret(&target.api_key_locator)
+            .map_err(|error| {
+                Self::map_secret_lookup_error(&target.display_name, &target.profile_name, error)
+            })?;
         let request = ItermExecutionRequest {
             request_id: target.target_id.clone(),
             session_id: target.iterm_session_id.clone(),

@@ -141,6 +141,50 @@ async fn updates_profile_fields_and_secret() -> Result<(), Box<dyn std::error::E
 }
 
 #[tokio::test]
+async fn keeps_existing_secret_when_updating_profile_without_new_api_key(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+
+    let updated = service
+        .update_profile(
+            &created.id,
+            UpdateProfileInput {
+                name: "GPT 5.4 updated".to_string(),
+                provider: "openai".to_string(),
+                model_name: "gpt-5.4-mini".to_string(),
+                base_url: "https://api.example.com/v2".to_string(),
+                api_key: "".to_string(),
+            },
+        )
+        .await?;
+
+    assert_eq!(updated.name, "GPT 5.4 updated");
+    assert_eq!(updated.model_name, "gpt-5.4-mini");
+    assert_eq!(updated.base_url, "https://api.example.com/v2");
+    assert_eq!(updated.api_key_encrypted, created.api_key_encrypted);
+    assert_eq!(
+        secret_store
+            .get_secret(&profile_secret_locator(&created.id))
+            .as_deref(),
+        Some("secret-1")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn deletes_profile_when_not_bound() -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
     let secret_store = Arc::new(MemorySecretStore::default());
