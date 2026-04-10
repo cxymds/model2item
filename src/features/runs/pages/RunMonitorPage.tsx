@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   listTargetMessages,
@@ -10,6 +10,7 @@ import { saveRecentRun } from "../lib/recentRun";
 import { RunTargetStatusCard } from "../components/RunTargetStatusCard";
 import { comparisonRunQuery, comparisonTargetsQuery } from "../lib/runQueries";
 import { buildRunTargetViewModels } from "../lib/runViewModel";
+import type { ComparisonMessageResponse } from "../../../types/api";
 
 function buildTargetPreview(content: string | null) {
   const normalized = (content ?? "").trim();
@@ -18,11 +19,145 @@ function buildTargetPreview(content: string | null) {
   return `${normalized.slice(0, 280)}...`;
 }
 
+type TargetConversationDrawerProps = {
+  targetId: string;
+  expanded: boolean;
+  onToggle: () => void;
+};
+
+function buildMessageGroups(messages: ComparisonMessageResponse[]) {
+  const groups: Array<{
+    role: string;
+    ids: string[];
+    content: string;
+  }> = [];
+
+  for (const message of messages) {
+    const previous = groups.at(-1);
+    if (previous && previous.role === message.role) {
+      previous.ids.push(message.id);
+      previous.content = `${previous.content}\n\n${message.content}`;
+      continue;
+    }
+
+    groups.push({
+      role: message.role,
+      ids: [message.id],
+      content: message.content,
+    });
+  }
+
+  return groups;
+}
+
+function TargetConversationDrawer({ targetId, expanded, onToggle }: TargetConversationDrawerProps) {
+  const drawerRef = useRef<HTMLDivElement | null>(null);
+  const previousMessageIdsRef = useRef<string[] | null>(null);
+  const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isFollowPaused, setIsFollowPaused] = useState(false);
+  const targetMessagesQuery = useQuery({
+    queryKey: ["target-messages", targetId],
+    queryFn: () => listTargetMessages(targetId),
+    enabled: true,
+    refetchInterval: 2000,
+  });
+  const currentMessageIds = targetMessagesQuery.data?.map((message) => message.id) ?? [];
+  const nextHighlightedIds = new Set(
+    previousMessageIdsRef.current === null
+      ? currentMessageIds
+      : currentMessageIds.filter((id) => !previousMessageIdsRef.current?.includes(id)),
+  );
+  const groups = buildMessageGroups(targetMessagesQuery.data ?? []);
+
+  useEffect(() => {
+    if (!expanded || isFollowPaused || !targetMessagesQuery.data) return;
+
+    if (drawerRef.current) {
+      drawerRef.current.scrollTop = drawerRef.current.scrollHeight;
+    }
+  }, [currentMessageIds, expanded, isFollowPaused, targetMessagesQuery.data]);
+
+  useEffect(() => {
+    if (!targetMessagesQuery.data) return;
+
+    if (nextHighlightedIds.size > 0) {
+      setUnreadIds((current) => new Set([...current, ...nextHighlightedIds]));
+    }
+
+    if (expanded && !isFollowPaused) {
+      setUnreadCount(0);
+    } else if (nextHighlightedIds.size > 0) {
+      setUnreadCount((current) => current + nextHighlightedIds.size);
+    }
+
+    previousMessageIdsRef.current = currentMessageIds;
+  }, [currentMessageIds, expanded, isFollowPaused, nextHighlightedIds.size, targetMessagesQuery.data]);
+
+  return (
+    <div className="stack-block" style={{ gap: 8 }}>
+      <div className="inline-actions">
+        <button className="ghost-btn" onClick={onToggle} type="button">
+          {expanded
+            ? "收起完整日志"
+            : unreadCount > 0 || (previousMessageIdsRef.current === null && currentMessageIds.length > 0)
+              ? `展开完整日志 (${unreadCount || currentMessageIds.length} 条未读)`
+              : "展开完整日志"}
+        </button>
+        {expanded ? (
+          <button
+            className="ghost-btn"
+            onClick={() => {
+              setIsFollowPaused((current) => {
+                const nextValue = !current;
+                if (current) {
+                  setUnreadCount(0);
+                  setUnreadIds(new Set());
+                }
+                return nextValue;
+              });
+            }}
+            type="button"
+          >
+            {isFollowPaused ? "恢复跟随" : "冻结跟随"}
+          </button>
+        ) : null}
+      </div>
+      {expanded ? (
+        <div className="message-drawer" ref={drawerRef}>
+          {targetMessagesQuery.isLoading ? <p className="muted">正在加载会话日志...</p> : null}
+          {targetMessagesQuery.isError ? (
+            <p className="error-text">加载会话日志失败。{String(targetMessagesQuery.error)}</p>
+          ) : null}
+          {groups.map((group) => {
+            const isNew = group.ids.some((id) => unreadIds.has(id));
+            return (
+              <article
+                className={`message-bubble ${group.role} ${isNew ? "is-new" : ""}`}
+                data-is-new={isNew ? "true" : "false"}
+                key={group.ids.join("-")}
+              >
+                <strong>
+                  {group.role === "assistant" ? "模型输出" : group.role === "user" ? "输入" : "系统"}
+                </strong>
+                <p>{group.content}</p>
+              </article>
+            );
+          })}
+          {targetMessagesQuery.data && targetMessagesQuery.data.length === 0 ? (
+            <p className="muted">这个窗口暂时还没有记录到会话消息。</p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function RunMonitorPage() {
   const { runId } = useParams();
   const normalizedRunId = runId ?? "";
   const [followUpPrompt, setFollowUpPrompt] = useState("");
-  const [expandedTargetId, setExpandedTargetId] = useState<string | null>(null);
+  const [expandedTargetIds, setExpandedTargetIds] = useState<string[]>([]);
   const runQuery = useQuery({
     ...comparisonRunQuery(normalizedRunId),
     refetchInterval: 2000,
@@ -41,12 +176,6 @@ export function RunMonitorPage() {
       setFollowUpPrompt("");
       await Promise.all([runQuery.refetch(), targetsQuery.refetch()]);
     },
-  });
-  const targetMessagesQuery = useQuery({
-    queryKey: ["target-messages", expandedTargetId],
-    queryFn: () => listTargetMessages(expandedTargetId ?? ""),
-    enabled: expandedTargetId !== null,
-    refetchInterval: expandedTargetId ? 2000 : false,
   });
   const targetViewModels = buildRunTargetViewModels(targetsQuery.data ?? []);
 
@@ -144,34 +273,17 @@ export function RunMonitorPage() {
                 : "最新输出"
             }
             details={
-              <div className="stack-block" style={{ gap: 8 }}>
-                <button
-                  className="ghost-btn"
-                  onClick={() => {
-                    setExpandedTargetId((current) => (current === target.id ? null : target.id));
-                  }}
-                  type="button"
-                >
-                  {expandedTargetId === target.id ? "收起完整日志" : "展开完整日志"}
-                </button>
-                {expandedTargetId === target.id ? (
-                  <div className="message-drawer">
-                    {targetMessagesQuery.isLoading ? <p className="muted">正在加载会话日志...</p> : null}
-                    {targetMessagesQuery.isError ? (
-                      <p className="error-text">加载会话日志失败。{String(targetMessagesQuery.error)}</p>
-                    ) : null}
-                    {targetMessagesQuery.data?.map((message) => (
-                      <article className={`message-bubble ${message.role}`} key={message.id}>
-                        <strong>{message.role === "assistant" ? "模型输出" : message.role === "user" ? "输入" : "系统"}</strong>
-                        <p>{message.content}</p>
-                      </article>
-                    ))}
-                    {targetMessagesQuery.data && targetMessagesQuery.data.length === 0 ? (
-                      <p className="muted">这个窗口暂时还没有记录到会话消息。</p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
+              <TargetConversationDrawer
+                expanded={expandedTargetIds.includes(target.id)}
+                onToggle={() => {
+                  setExpandedTargetIds((current) =>
+                    current.includes(target.id)
+                      ? current.filter((id) => id !== target.id)
+                      : [...current, target.id],
+                  );
+                }}
+                targetId={target.id}
+              />
             }
           />
         ))}

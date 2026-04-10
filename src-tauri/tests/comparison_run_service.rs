@@ -142,8 +142,8 @@ async fn rejects_comparison_run_with_empty_target_ids() -> Result<(), Box<dyn st
 }
 
 #[tokio::test]
-async fn rejects_creating_a_second_active_comparison_run(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn rejects_creating_a_second_active_comparison_run() -> Result<(), Box<dyn std::error::Error>>
+{
     let pool = support::create_test_pool().await?;
     let profile_service =
         ProfileService::with_secret_store(pool.clone(), Arc::new(MemorySecretStore::default()));

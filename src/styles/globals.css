@@ -193,6 +193,12 @@ body {
   opacity: 0.45;
 }
 
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .card-list {
   margin: 0;
   padding: 0;
@@ -273,6 +279,10 @@ body {
   border-radius: 10px;
   padding: 10px;
   border: 1px solid rgba(148, 163, 184, 0.22);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
 }
 
 .message-bubble.user {
@@ -297,6 +307,12 @@ body {
   margin: 0;
   white-space: pre-wrap;
   color: #d6deee;
+}
+
+.message-bubble.is-new {
+  border-color: rgba(250, 204, 21, 0.8);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.24);
+  transform: translateY(-1px);
 }
 
 .status-card h4 {

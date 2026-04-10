@@ -135,7 +135,9 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                 .send_text(&target.iterm_session_id, &format!("{prompt}\n"))
                 .await
                 .map_err(classify_adapter_error)?;
-            let screen_text = self.capture_interactive_output(&target.iterm_session_id).await?;
+            let screen_text = self
+                .capture_interactive_output(&target.iterm_session_id)
+                .await?;
             if !screen_text.trim().is_empty() {
                 self.run_service
                     .record_target_interactive_output(&target.target_id, &screen_text)

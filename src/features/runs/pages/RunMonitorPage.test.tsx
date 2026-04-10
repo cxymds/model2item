@@ -25,9 +25,17 @@ const { listTargetMessagesMock } = vi.hoisted(() => {
         id: "msg-2",
         comparison_target_id: "target-1",
         role: "assistant",
-        content: "这是完整会话日志里的模型回答。",
+        content: "这是完整会话日志里的第一段模型回答。",
         message_type: "response",
         created_at: "2026-01-01T00:00:03Z",
+      },
+      {
+        id: "msg-3",
+        comparison_target_id: "target-1",
+        role: "assistant",
+        content: "这是第二段模型回答，会和上一段合并显示。",
+        message_type: "response",
+        created_at: "2026-01-01T00:00:04Z",
       },
     ]),
   };
@@ -170,12 +178,34 @@ describe("RunMonitorPage", () => {
       </MemoryRouter>,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "展开完整日志" }));
+    expect(await screen.findByRole("button", { name: "展开完整日志 (3 条未读)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "展开完整日志 (3 条未读)" }));
 
     await waitFor(() => {
       expect(listTargetMessagesMock).toHaveBeenCalledWith("target-1");
     });
-    expect(await screen.findByText("这是完整会话日志里的模型回答。")).toBeInTheDocument();
+    expect(
+      await screen.findByText((content) =>
+        content.includes("这是完整会话日志里的第一段模型回答。") &&
+        content.includes("这是第二段模型回答，会和上一段合并显示。"),
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText("先总结整体结构")).toBeInTheDocument();
+    expect(screen.getAllByText("模型输出")).toHaveLength(1);
+    expect(
+      screen
+        .getByText((content) =>
+          content.includes("这是完整会话日志里的第一段模型回答。") &&
+          content.includes("这是第二段模型回答，会和上一段合并显示。"),
+        )
+        .closest("article"),
+    ).toHaveAttribute(
+      "data-is-new",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "收起完整日志" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "冻结跟随" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "冻结跟随" }));
+    expect(screen.getByRole("button", { name: "恢复跟随" })).toBeInTheDocument();
   });
 });

@@ -83,7 +83,8 @@ impl ProfileService {
         let now = Utc::now().to_rfc3339();
         let api_key_locator = profile_secret_locator(id);
         if !input.api_key.trim().is_empty() {
-            self.secret_store.set_secret(&api_key_locator, &input.api_key)?;
+            self.secret_store
+                .set_secret(&api_key_locator, &input.api_key)?;
         }
 
         sqlx::query(

@@ -8,8 +8,9 @@ use crate::{
     },
     services::{
         iterm_mcp_adapter::PythonItermMcpAdapter,
-        iterm_session_service::ItermSessionService, window_binding_service::WindowBindingService,
+        iterm_session_service::ItermSessionService,
         secret_store::SystemSecretStore,
+        window_binding_service::WindowBindingService,
         window_binding_sync_service::{create_window_binding_and_sync, WindowBindingSyncService},
     },
 };

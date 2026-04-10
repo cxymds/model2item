@@ -18,9 +18,7 @@ use iterm_mcp_tools_lib::{
         profile_service::ProfileService,
         secret_store::MemorySecretStore,
         window_binding_service::WindowBindingService,
-        window_binding_sync_service::{
-            create_window_binding_and_sync, WindowBindingSyncService,
-        },
+        window_binding_sync_service::{create_window_binding_and_sync, WindowBindingSyncService},
     },
 };
 use std::{

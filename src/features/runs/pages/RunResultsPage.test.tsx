@@ -1,8 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 import { RunResultsPage } from "./RunResultsPage";
+
+const { exportComparisonRunReportMock } = vi.hoisted(() => {
+  return {
+    exportComparisonRunReportMock: vi.fn().mockResolvedValue("/tmp/run-1-report.md"),
+  };
+});
 
 vi.mock("../../../lib/tauri", () => {
   return {
@@ -35,10 +41,15 @@ vi.mock("../../../lib/tauri", () => {
       queued_count: 1,
       summary_text: "fastest=openai / gpt-5.4; longest=openai / gpt-5.4; queued=1",
     }),
+    exportComparisonRunReport: exportComparisonRunReportMock,
   };
 });
 
 describe("RunResultsPage", () => {
+  beforeEach(() => {
+    exportComparisonRunReportMock.mockClear();
+  });
+
   it("renders summary text from comparison summary endpoint", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -56,5 +67,28 @@ describe("RunResultsPage", () => {
 
     expect(await screen.findByText("运行结果")).toBeInTheDocument();
     expect(await screen.findByText(/最快目标：openai \/ gpt-5.4/)).toBeInTheDocument();
+  });
+
+  it("exports a markdown report for the current run", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/runs/run-1/results"]}>
+        <QueryClientProvider client={queryClient}>
+          <Routes>
+            <Route path="/runs/:runId/results" element={<RunResultsPage />} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "导出 Markdown 报告" }));
+
+    await waitFor(() => {
+      expect(exportComparisonRunReportMock).toHaveBeenCalledWith("run-1");
+    });
+    expect(await screen.findByText("报告已导出到 /tmp/run-1-report.md")).toBeInTheDocument();
   });
 });

@@ -1,5 +1,9 @@
 use serde::Deserialize;
 use sqlx::SqlitePool;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     error::AppError,
@@ -95,6 +99,75 @@ pub fn build_comparison_summary(
     }
 }
 
+fn build_markdown_report(
+    summary: &ComparisonSummaryResponse,
+    raw_targets: &[ComparisonTargetRecord],
+) -> String {
+    let mut lines = vec![
+        format!("# {}", summary.run.title),
+        String::new(),
+        format!("- 运行 ID：{}", summary.run.id),
+        format!("- 状态：{}", summary.run.status),
+        format!("- 创建时间：{}", summary.run.created_at),
+        format!("- 汇总：{}", summary.summary_text),
+        String::new(),
+        "## 指标概览".to_string(),
+        String::new(),
+        "| 目标 | 状态 | 耗时(ms) | 字符数 | 行数 |".to_string(),
+        "| --- | --- | ---: | ---: | ---: |".to_string(),
+    ];
+
+    for target in &summary.targets {
+        lines.push(format!(
+            "| {} | {} | {} | {} | {} |",
+            target.label,
+            target.status,
+            target
+                .duration_ms
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            target.response_chars,
+            target.response_lines
+        ));
+    }
+
+    lines.push(String::new());
+    lines.push("## 最新输出".to_string());
+    lines.push(String::new());
+
+    for target in raw_targets {
+        let label = summary
+            .targets
+            .iter()
+            .find(|item| item.target_id == target.id)
+            .map(|item| item.label.clone())
+            .unwrap_or_else(|| format!("Target {}", target.id));
+        let role_label = match target.latest_message_role.as_deref() {
+            Some("assistant") => "模型输出",
+            Some("user") => "用户输入",
+            Some("system") => "系统消息",
+            _ => "最新消息",
+        };
+        let content = target
+            .latest_message_content
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("暂无输出。");
+
+        lines.push(format!("### {}", label));
+        lines.push(String::new());
+        lines.push(format!("- 消息类型：{}", role_label));
+        lines.push(format!("- 目标状态：{}", target.status));
+        lines.push(String::new());
+        lines.push("```text".to_string());
+        lines.push(content.to_string());
+        lines.push("```".to_string());
+        lines.push(String::new());
+    }
+
+    lines.join("\n")
+}
+
 #[derive(Clone)]
 pub struct AnalysisService {
     run_service: ComparisonRunService,
@@ -114,5 +187,20 @@ impl AnalysisService {
         let run = self.run_service.get_comparison_run(run_id).await?;
         let targets = self.run_service.list_comparison_targets(run_id).await?;
         Ok(build_comparison_summary(run, targets))
+    }
+
+    pub async fn export_comparison_run_report(
+        &self,
+        run_id: &str,
+        output_dir: &Path,
+    ) -> Result<PathBuf, AppError> {
+        let summary = self.get_comparison_summary(run_id).await?;
+        let targets = self.run_service.list_comparison_targets(run_id).await?;
+        fs::create_dir_all(output_dir)?;
+
+        let report_path = output_dir.join(format!("run-{run_id}-report.md"));
+        fs::write(&report_path, build_markdown_report(&summary, &targets))?;
+
+        Ok(report_path)
     }
 }

@@ -35,7 +35,9 @@ fn spawn_window_binding_sync_task(pool: sqlx::SqlitePool) {
                     let _ = binding_service
                         .sync_with_online_sessions(&online_session_ids)
                         .await;
-                    let _ = run_service.reconcile_closed_sessions(&online_session_ids).await;
+                    let _ = run_service
+                        .reconcile_closed_sessions(&online_session_ids)
+                        .await;
                 }
                 Err(_) => {}
             }
@@ -89,6 +91,7 @@ pub fn run() {
             commands::comparison_commands::list_comparison_targets,
             commands::comparison_commands::list_target_messages,
             commands::comparison_commands::get_comparison_summary,
+            commands::comparison_commands::export_comparison_run_report,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run tauri app");

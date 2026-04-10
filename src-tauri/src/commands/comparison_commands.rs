@@ -1,11 +1,10 @@
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::{
     app_state::AppState,
     models::comparison_run::{
         ComparisonMessageResponse, ComparisonRunResponse, ComparisonSummaryResponse,
-        ComparisonTargetResponse,
-        CreateComparisonRunInput,
+        ComparisonTargetResponse, CreateComparisonRunInput,
     },
     services::{
         analysis_service::AnalysisService, comparison_orchestrator::ComparisonOrchestrator,
@@ -87,6 +86,25 @@ pub async fn get_comparison_summary(
         .get_comparison_summary(&run_id)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn export_comparison_run_report(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<String, String> {
+    let service = AnalysisService::new(state.pool.clone());
+    let export_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("exports");
+    let path = service
+        .export_comparison_run_report(&run_id, &export_dir)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]

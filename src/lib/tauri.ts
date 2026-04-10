@@ -104,3 +104,7 @@ export function listTargetMessages(targetId: string) {
 export function getComparisonSummary(runId: string) {
   return core.invoke<ComparisonSummaryResponse>("get_comparison_summary", { runId });
 }
+
+export function exportComparisonRunReport(runId: string) {
+  return core.invoke<string>("export_comparison_run_report", { runId });
+}

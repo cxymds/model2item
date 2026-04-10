@@ -167,8 +167,7 @@ async fn deletes_profile_when_not_bound() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[tokio::test]
-async fn rejects_deleting_profile_when_bound_to_window(
-) -> Result<(), Box<dyn std::error::Error>> {
+async fn rejects_deleting_profile_when_bound_to_window() -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
     let secret_store = Arc::new(MemorySecretStore::default());
     let service = ProfileService::with_secret_store(pool.clone(), secret_store);

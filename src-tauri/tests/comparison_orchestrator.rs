@@ -233,7 +233,10 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
     assert!(success_target.response_chars > 0);
     assert!(success_target.response_lines > 0);
     assert_eq!(success_target.error_category, None);
-    assert_eq!(success_target.latest_message_role.as_deref(), Some("assistant"));
+    assert_eq!(
+        success_target.latest_message_role.as_deref(),
+        Some("assistant")
+    );
     assert!(success_target
         .latest_message_content
         .as_deref()
@@ -485,15 +488,20 @@ async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
         target.latest_message_content.as_deref(),
         Some("Claude 已进入会话，并开始输出首段结果。")
     );
-    assert_eq!(target.response_chars, "Claude 已进入会话，并开始输出首段结果。".chars().count() as i64);
-    assert!(adapter
-        .screen_reads
-        .lock()
-        .expect("screen_reads mutex")
-        .get("session-delayed")
-        .copied()
-        .unwrap_or_default()
-        >= 3);
+    assert_eq!(
+        target.response_chars,
+        "Claude 已进入会话，并开始输出首段结果。".chars().count() as i64
+    );
+    assert!(
+        adapter
+            .screen_reads
+            .lock()
+            .expect("screen_reads mutex")
+            .get("session-delayed")
+            .copied()
+            .unwrap_or_default()
+            >= 3
+    );
 
     Ok(())
 }

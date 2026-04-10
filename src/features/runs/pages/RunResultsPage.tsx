@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
+import { exportComparisonRunReport } from "../../../lib/tauri";
 import { MetricTable } from "../components/MetricTable";
 import { ResultComparisonGrid } from "../components/ResultComparisonGrid";
 import { comparisonSummaryQuery } from "../lib/runQueries";
@@ -28,7 +29,14 @@ function buildSummaryText(
 export function RunResultsPage() {
   const { runId } = useParams();
   const normalizedRunId = runId ?? "";
+  const [exportedPath, setExportedPath] = useState<string | null>(null);
   const summaryQuery = useQuery(comparisonSummaryQuery(normalizedRunId));
+  const exportReportMutation = useMutation({
+    mutationFn: (runId: string) => exportComparisonRunReport(runId),
+    onSuccess: (path) => {
+      setExportedPath(path);
+    },
+  });
   const targetViewModels = buildRunTargetViewModelsFromSummary(summaryQuery.data?.targets ?? []);
 
   useEffect(() => {
@@ -50,12 +58,27 @@ export function RunResultsPage() {
             ? `${summaryQuery.data.run.title} 的结果对比（${summaryQuery.data.run.status}）`
             : `运行任务 ${normalizedRunId || "未知"} 的并排对比视图`}
         </p>
+        <button
+          className="ghost-btn"
+          disabled={exportReportMutation.isPending || normalizedRunId.length === 0}
+          onClick={() => {
+            setExportedPath(null);
+            exportReportMutation.mutate(normalizedRunId);
+          }}
+          type="button"
+        >
+          {exportReportMutation.isPending ? "导出中..." : "导出 Markdown 报告"}
+        </button>
       </header>
 
       {summaryQuery.isLoading ? <p className="muted">正在加载运行结果...</p> : null}
       {summaryQuery.isError ? (
         <p className="error-text">加载汇总结果失败。{String(summaryQuery.error)}</p>
       ) : null}
+      {exportReportMutation.isError ? (
+        <p className="error-text">导出报告失败。{String(exportReportMutation.error)}</p>
+      ) : null}
+      {exportedPath ? <p className="muted">报告已导出到 {exportedPath}</p> : null}
 
       <ResultComparisonGrid columns={toComparisonColumns(targetViewModels)} />
 

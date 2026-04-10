@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  exportComparisonRunReport,
   deleteProfile,
   deleteWindowBinding,
   listProfiles,
@@ -42,6 +43,7 @@ describe("comparison run tauri bindings", () => {
     await listComparisonTargets("run-123");
     await listTargetMessages("target-456");
     await getComparisonSummary("run-123");
+    await exportComparisonRunReport("run-123");
 
     expect(invokeMock).toHaveBeenNthCalledWith(1, "list_comparison_runs");
     expect(invokeMock).toHaveBeenNthCalledWith(2, "start_comparison_run", { runId: "run-123" });
@@ -53,6 +55,7 @@ describe("comparison run tauri bindings", () => {
     expect(invokeMock).toHaveBeenNthCalledWith(5, "list_comparison_targets", { runId: "run-123" });
     expect(invokeMock).toHaveBeenNthCalledWith(6, "list_target_messages", { targetId: "target-456" });
     expect(invokeMock).toHaveBeenNthCalledWith(7, "get_comparison_summary", { runId: "run-123" });
+    expect(invokeMock).toHaveBeenNthCalledWith(8, "export_comparison_run_report", { runId: "run-123" });
   });
 });
 
