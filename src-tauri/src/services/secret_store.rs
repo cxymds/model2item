@@ -10,6 +10,7 @@ pub const SECRET_SERVICE_NAME: &str = "com.cxymds.itermmcptools";
 pub trait SecretStore: Send + Sync {
     fn set_secret(&self, locator: &str, secret: &str) -> Result<(), AppError>;
     fn get_secret(&self, locator: &str) -> Result<String, AppError>;
+    fn delete_secret(&self, locator: &str) -> Result<(), AppError>;
 }
 
 #[derive(Debug, Default)]
@@ -29,6 +30,14 @@ impl SecretStore for SystemSecretStore {
             .map_err(|error| AppError::SecretStore(error.to_string()))?;
         entry
             .get_password()
+            .map_err(|error| AppError::SecretStore(error.to_string()))
+    }
+
+    fn delete_secret(&self, locator: &str) -> Result<(), AppError> {
+        let entry = keyring::Entry::new(SECRET_SERVICE_NAME, locator)
+            .map_err(|error| AppError::SecretStore(error.to_string()))?;
+        entry
+            .delete_credential()
             .map_err(|error| AppError::SecretStore(error.to_string()))
     }
 }
@@ -66,6 +75,14 @@ impl SecretStore for MemorySecretStore {
             .ok_or_else(|| {
                 AppError::MissingDependency(format!("secret not found for locator {locator}"))
             })
+    }
+
+    fn delete_secret(&self, locator: &str) -> Result<(), AppError> {
+        self.secrets
+            .lock()
+            .map_err(|_| AppError::SecretStore("memory secret store lock poisoned".to_string()))?
+            .remove(locator);
+        Ok(())
     }
 }
 

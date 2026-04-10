@@ -43,7 +43,7 @@ impl WindowBindingService {
 
     pub async fn list_window_bindings(&self) -> Result<Vec<WindowBindingRecord>, AppError> {
         let rows = sqlx::query_as::<_, WindowBindingRecord>(
-            "SELECT * FROM window_bindings ORDER BY rowid DESC",
+            "SELECT * FROM window_bindings WHERE enabled = 1 ORDER BY rowid DESC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -83,23 +83,49 @@ impl WindowBindingService {
     }
 
     pub async fn delete_window_binding(&self, id: &str) -> Result<(), AppError> {
-        let reference_count = sqlx::query_scalar::<_, i64>(
+        let active_reference_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(1)
+            FROM comparison_targets ct
+            JOIN comparison_runs cr ON cr.id = ct.run_id
+            WHERE ct.window_binding_id = ?
+              AND cr.status IN ('queued', 'running')
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if active_reference_count > 0 {
+            return Err(AppError::InvalidInput(
+                "window binding is referenced by comparison runs".to_string(),
+            ));
+        }
+
+        let historical_reference_count = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(1) FROM comparison_targets WHERE window_binding_id = ?",
         )
         .bind(id)
         .fetch_one(&self.pool)
         .await?;
 
-        if reference_count > 0 {
-            return Err(AppError::InvalidInput(
-                "window binding is referenced by comparison runs".to_string(),
-            ));
-        }
-
-        sqlx::query("DELETE FROM window_bindings WHERE id = ?")
+        if historical_reference_count > 0 {
+            sqlx::query(
+                r#"
+                UPDATE window_bindings
+                SET enabled = 0, metadata_json = '{"deleted":true}'
+                WHERE id = ?
+                "#,
+            )
             .bind(id)
             .execute(&self.pool)
             .await?;
+        } else {
+            sqlx::query("DELETE FROM window_bindings WHERE id = ?")
+                .bind(id)
+                .execute(&self.pool)
+                .await?;
+        }
 
         Ok(())
     }
@@ -132,18 +158,44 @@ impl WindowBindingService {
                 continue;
             }
 
-            let reference_count = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(1) FROM comparison_targets WHERE window_binding_id = ?",
+            let active_reference_count = sqlx::query_scalar::<_, i64>(
+                r#"
+                SELECT COUNT(1)
+                FROM comparison_targets ct
+                JOIN comparison_runs cr ON cr.id = ct.run_id
+                WHERE ct.window_binding_id = ?
+                  AND cr.status IN ('queued', 'running')
+                "#,
             )
             .bind(&binding.id)
             .fetch_one(&mut *tx)
             .await?;
 
-            if reference_count == 0 {
-                sqlx::query("DELETE FROM window_bindings WHERE id = ?")
+            if active_reference_count == 0 {
+                let historical_reference_count = sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(1) FROM comparison_targets WHERE window_binding_id = ?",
+                )
+                .bind(&binding.id)
+                .fetch_one(&mut *tx)
+                .await?;
+
+                if historical_reference_count > 0 {
+                    sqlx::query(
+                        r#"
+                        UPDATE window_bindings
+                        SET enabled = 0, metadata_json = '{"deleted":true}'
+                        WHERE id = ?
+                        "#,
+                    )
                     .bind(&binding.id)
                     .execute(&mut *tx)
                     .await?;
+                } else {
+                    sqlx::query("DELETE FROM window_bindings WHERE id = ?")
+                        .bind(&binding.id)
+                        .execute(&mut *tx)
+                        .await?;
+                }
             }
         }
 

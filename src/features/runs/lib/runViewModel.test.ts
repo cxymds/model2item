@@ -21,6 +21,8 @@ describe("runViewModel", () => {
       success_status: null,
       error_category: null,
       error_detail: null,
+      latest_message_role: null,
+      latest_message_content: null,
     };
 
     const vm = buildRunTargetViewModel(target);
@@ -51,6 +53,8 @@ describe("runViewModel", () => {
       success_status: null,
       error_category: null,
       error_detail: null,
+      latest_message_role: null,
+      latest_message_content: null,
     };
 
     const vm = buildRunTargetViewModel(target);

@@ -20,6 +20,14 @@ export type CreateProfileInput = {
   api_key: string;
 };
 
+export type UpdateProfileInput = {
+  name: string;
+  provider: string;
+  model_name: string;
+  base_url: string;
+  api_key: string;
+};
+
 export type WindowBindingResponse = {
   id: string;
   iterm_session_id: string;
@@ -113,6 +121,8 @@ export type ComparisonTargetResponse = {
   success_status: string | null;
   error_category: string | null;
   error_detail: string | null;
+  latest_message_role: string | null;
+  latest_message_content: string | null;
 };
 
 export type ComparisonSummaryTargetResponse = {
@@ -135,4 +145,13 @@ export type ComparisonSummaryResponse = {
   longest_target_id: string | null;
   queued_count: number;
   summary_text: string;
+};
+
+export type ComparisonMessageResponse = {
+  id: string;
+  comparison_target_id: string;
+  role: string;
+  content: string;
+  message_type: string;
+  created_at: string;
 };

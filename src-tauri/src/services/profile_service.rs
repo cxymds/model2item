@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    models::profile::{CreateProfileInput, ModelProfileRecord},
+    models::profile::{CreateProfileInput, ModelProfileRecord, UpdateProfileInput},
     services::secret_store::{profile_secret_locator, SecretStore, SystemSecretStore},
 };
 
@@ -73,5 +73,65 @@ impl ProfileService {
         .fetch_one(&self.pool)
         .await?;
         Ok(row)
+    }
+
+    pub async fn update_profile(
+        &self,
+        id: &str,
+        input: UpdateProfileInput,
+    ) -> Result<ModelProfileRecord, AppError> {
+        let now = Utc::now().to_rfc3339();
+        let api_key_locator = profile_secret_locator(id);
+        if !input.api_key.trim().is_empty() {
+            self.secret_store.set_secret(&api_key_locator, &input.api_key)?;
+        }
+
+        sqlx::query(
+            r#"
+            UPDATE model_profiles
+            SET
+              name = ?,
+              provider = ?,
+              model_name = ?,
+              base_url = ?,
+              api_key_encrypted = ?,
+              updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&input.name)
+        .bind(&input.provider)
+        .bind(&input.model_name)
+        .bind(&input.base_url)
+        .bind(&api_key_locator)
+        .bind(&now)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        self.get_profile(id).await
+    }
+
+    pub async fn delete_profile(&self, id: &str) -> Result<(), AppError> {
+        let binding_count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM window_bindings WHERE profile_id = ?",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if binding_count > 0 {
+            return Err(AppError::InvalidInput(
+                "profile is still referenced by window bindings".to_string(),
+            ));
+        }
+
+        sqlx::query("DELETE FROM model_profiles WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        let _ = self.secret_store.delete_secret(&profile_secret_locator(id));
+
+        Ok(())
     }
 }

@@ -3,7 +3,8 @@ use tauri::State;
 use crate::{
     app_state::AppState,
     models::comparison_run::{
-        ComparisonRunResponse, ComparisonSummaryResponse, ComparisonTargetResponse,
+        ComparisonMessageResponse, ComparisonRunResponse, ComparisonSummaryResponse,
+        ComparisonTargetResponse,
         CreateComparisonRunInput,
     },
     services::{
@@ -64,6 +65,19 @@ pub async fn list_comparison_targets(
 }
 
 #[tauri::command]
+pub async fn list_target_messages(
+    state: State<'_, AppState>,
+    target_id: String,
+) -> Result<Vec<ComparisonMessageResponse>, String> {
+    let service = ComparisonRunService::new(state.pool.clone());
+    let messages = service
+        .list_target_messages(&target_id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(messages.into_iter().map(Into::into).collect())
+}
+
+#[tauri::command]
 pub async fn get_comparison_summary(
     state: State<'_, AppState>,
     run_id: String,
@@ -82,10 +96,28 @@ pub async fn start_comparison_run(
 ) -> Result<(), String> {
     let pool = state.pool.clone();
     let run_service = ComparisonRunService::new(pool.clone());
-    run_service
+    let run = run_service
         .get_comparison_run(&run_id)
         .await
         .map_err(|error| error.to_string())?;
+    if let Some(active_run) = run_service
+        .get_active_comparison_run()
+        .await
+        .map_err(|error| error.to_string())?
+    {
+        if active_run.id != run_id {
+            return Err(format!(
+                "invalid input: an active comparison run already exists: {}",
+                active_run.title
+            ));
+        }
+    }
+    if run.status == "running" {
+        return Err(format!(
+            "invalid input: comparison run {} is already running",
+            run.title
+        ));
+    }
 
     tauri::async_runtime::spawn(async move {
         let orchestrator = ComparisonOrchestrator::new(pool);

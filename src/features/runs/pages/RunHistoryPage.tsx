@@ -31,7 +31,8 @@ export function RunHistoryPage() {
   });
 
   const runs = runsQuery.data ?? [];
-  const activeRuns = runs.filter(isActiveRun);
+  const activeRun = runs.find(isActiveRun) ?? null;
+  const completedRuns = runs.filter((run) => !isActiveRun(run));
 
   return (
     <section className="page stack-block">
@@ -46,22 +47,26 @@ export function RunHistoryPage() {
       <section className="stack-block">
         <header className="section-header">
           <h3>当前运行</h3>
-          <p>这里会展示仍处于排队中或运行中的任务。</p>
+          <p>系统当前只允许一个运行中的任务。</p>
         </header>
 
-        {activeRuns.length === 0 ? <p className="muted">当前没有运行中的任务。</p> : null}
+        {!activeRun ? <p className="muted">当前没有运行中的任务。</p> : null}
 
-        {activeRuns.map((run) => (
-          <article className="status-card" key={run.id}>
-            <h4>{run.title}</h4>
+        {activeRun ? (
+          <article className="status-card" key={activeRun.id}>
+            <h4>{activeRun.title}</h4>
             <p>
-              状态：{run.status}，创建时间：{formatDateTime(run.created_at)}
+              状态：{activeRun.status}，创建时间：{formatDateTime(activeRun.created_at)}
             </p>
-            <Link aria-label={getRunActionLabel(run)} className="secondary-btn" to={getRunDestination(run)}>
+            <Link
+              aria-label={getRunActionLabel(activeRun)}
+              className="secondary-btn"
+              to={getRunDestination(activeRun)}
+            >
               继续查看
             </Link>
           </article>
-        ))}
+        ) : null}
       </section>
 
       <section className="stack-block">
@@ -70,9 +75,9 @@ export function RunHistoryPage() {
           <p>最近 20 条运行记录，按创建时间倒序显示。</p>
         </header>
 
-        {runs.length === 0 ? <p className="muted">当前还没有历史运行记录。</p> : null}
+        {completedRuns.length === 0 ? <p className="muted">当前还没有历史运行记录。</p> : null}
 
-        {runs.map((run) => (
+        {completedRuns.map((run) => (
           <article className="status-card" key={run.id}>
             <h4>{run.title}</h4>
             <p>
@@ -80,7 +85,7 @@ export function RunHistoryPage() {
               {formatDateTime(run.finished_at)}
             </p>
             <Link aria-label={getRunActionLabel(run)} className="secondary-btn" to={getRunDestination(run)}>
-              {isActiveRun(run) ? "继续查看" : "查看结果"}
+              查看结果
             </Link>
           </article>
         ))}

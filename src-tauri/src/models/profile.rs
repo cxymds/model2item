@@ -58,3 +58,12 @@ pub struct CreateProfileInput {
     pub base_url: String,
     pub api_key: String,
 }
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateProfileInput {
+    pub name: String,
+    pub provider: String,
+    pub model_name: String,
+    pub base_url: String,
+    pub api_key: String,
+}

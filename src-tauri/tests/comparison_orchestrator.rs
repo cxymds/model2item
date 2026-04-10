@@ -182,6 +182,12 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
     assert!(success_target.response_chars > 0);
     assert!(success_target.response_lines > 0);
     assert_eq!(success_target.error_category, None);
+    assert_eq!(success_target.latest_message_role.as_deref(), Some("assistant"));
+    assert!(success_target
+        .latest_message_content
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Starting interactive Claude session"));
 
     let fail_target = targets
         .iter()
@@ -196,6 +202,7 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
     assert!(fail_target.sent_at.is_some());
     assert!(fail_target.finished_at.is_some());
     assert_eq!(fail_target.success_status.as_deref(), Some("failed"));
+    assert_eq!(fail_target.latest_message_role.as_deref(), Some("system"));
 
     let sent_texts = adapter.sent_texts.lock().expect("sent_texts mutex");
     assert!(sent_texts.iter().any(|(session_id, text)| {

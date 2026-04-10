@@ -1,5 +1,6 @@
 import { core } from "@tauri-apps/api";
 import type {
+  ComparisonMessageResponse,
   ComparisonRunResponse,
   ComparisonSummaryResponse,
   ComparisonTargetResponse,
@@ -11,6 +12,7 @@ import type {
   ItermSessionResponse,
   ProfileResponse,
   UpdateEvaluationCaseInput,
+  UpdateProfileInput,
   UpdateWindowBindingInput,
   WindowBindingResponse,
 } from "../types/api";
@@ -21,6 +23,14 @@ export function listProfiles() {
 
 export function createProfile(input: CreateProfileInput) {
   return core.invoke<ProfileResponse>("create_profile", { input });
+}
+
+export function updateProfile(id: string, input: UpdateProfileInput) {
+  return core.invoke<ProfileResponse>("update_profile", { id, input });
+}
+
+export function deleteProfile(id: string) {
+  return core.invoke<void>("delete_profile", { id });
 }
 
 export function listWindowBindings() {
@@ -85,6 +95,10 @@ export function getComparisonRun(runId: string) {
 
 export function listComparisonTargets(runId: string) {
   return core.invoke<ComparisonTargetResponse[]>("list_comparison_targets", { runId });
+}
+
+export function listTargetMessages(targetId: string) {
+  return core.invoke<ComparisonMessageResponse[]>("list_target_messages", { targetId });
 }
 
 export function getComparisonSummary(runId: string) {

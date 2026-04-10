@@ -48,7 +48,7 @@ vi.mock("../../../lib/tauri", () => {
 });
 
 describe("RunHistoryPage", () => {
-  it("renders active runs separately and links historical results", async () => {
+  it("renders a single current run section and links historical results", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -64,14 +64,12 @@ describe("RunHistoryPage", () => {
     );
 
     expect(await screen.findByText("历史运行")).toBeInTheDocument();
-    expect(await screen.findAllByText("Streaming parser benchmark")).toHaveLength(2);
+    expect(await screen.findByText("Streaming parser benchmark")).toBeInTheDocument();
     expect(screen.getByText("当前运行")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "继续查看 Streaming parser benchmark" })).toHaveLength(2);
-    screen
-      .getAllByRole("link", { name: "继续查看 Streaming parser benchmark" })
-      .forEach((link) => {
-        expect(link).toHaveAttribute("href", "/runs/run-3");
-      });
+    expect(screen.getByRole("link", { name: "继续查看 Streaming parser benchmark" })).toHaveAttribute(
+      "href",
+      "/runs/run-3",
+    );
 
     expect(screen.getByText("最近结果")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "查看结果 Legacy parser benchmark" })).toHaveAttribute(
@@ -82,5 +80,6 @@ describe("RunHistoryPage", () => {
       "href",
       "/runs/run-1/results",
     );
+    expect(screen.queryByRole("link", { name: "查看结果 Streaming parser benchmark" })).not.toBeInTheDocument();
   });
 });

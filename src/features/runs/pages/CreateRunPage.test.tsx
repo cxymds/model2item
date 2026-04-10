@@ -12,6 +12,7 @@ const { refreshWindowBindingPresence } = vi.hoisted(() => {
 
 vi.mock("../../../lib/tauri", () => {
   return {
+    listComparisonRuns: vi.fn().mockResolvedValue([]),
     listEvaluationCases: vi.fn().mockResolvedValue([
       {
         id: "case-1",
@@ -116,5 +117,33 @@ describe("CreateRunPage", () => {
     await waitFor(() => {
       expect(refreshWindowBindingPresence).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("shows the current active run instead of the creation form when a run is already active", async () => {
+    const { listComparisonRuns } = await import("../../../lib/tauri");
+    vi.mocked(listComparisonRuns).mockResolvedValueOnce([
+      {
+        id: "run-active",
+        evaluation_case_id: "case-1",
+        title: "Current benchmark",
+        status: "running",
+        prompt_snapshot: "prompt",
+        context_snapshot: "{}",
+        created_at: "2026-01-01T00:00:00Z",
+        started_at: "2026-01-01T00:00:10Z",
+        finished_at: null,
+        notes: "",
+      },
+    ]);
+
+    renderPage();
+
+    expect(await screen.findByText("当前正在进行的任务")).toBeInTheDocument();
+    expect(screen.getByText("Current benchmark")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "查看当前任务" })).toHaveAttribute(
+      "href",
+      "/runs/run-active",
+    );
+    expect(screen.queryByLabelText("任务标题")).not.toBeInTheDocument();
   });
 });

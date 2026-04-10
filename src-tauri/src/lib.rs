@@ -69,6 +69,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::profile_commands::create_profile,
             commands::profile_commands::list_profiles,
+            commands::profile_commands::update_profile,
+            commands::profile_commands::delete_profile,
             commands::window_binding_commands::create_window_binding,
             commands::window_binding_commands::list_window_bindings,
             commands::window_binding_commands::update_window_binding,
@@ -85,6 +87,7 @@ pub fn run() {
             commands::comparison_commands::get_comparison_run,
             commands::comparison_commands::list_comparison_runs,
             commands::comparison_commands::list_comparison_targets,
+            commands::comparison_commands::list_target_messages,
             commands::comparison_commands::get_comparison_summary,
         ])
         .run(tauri::generate_context!())

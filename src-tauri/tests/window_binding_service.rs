@@ -279,6 +279,61 @@ async fn rejects_deleting_window_binding_when_it_is_referenced_by_run(
 }
 
 #[tokio::test]
+async fn allows_deleting_window_binding_when_only_finished_runs_reference_it(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let profile_service =
+        ProfileService::with_secret_store(pool.clone(), Arc::new(MemorySecretStore::default()));
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Legacy parser".to_string(),
+            prompt: "Explain parser".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-finished".to_string(),
+            display_name: "Window Finished".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Finished Benchmark".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    run_service.finalize_run(&run.id, "done").await?;
+
+    binding_service.delete_window_binding(&binding.id).await?;
+    let bindings = binding_service.list_window_bindings().await?;
+    assert!(bindings.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn applies_binding_to_window_session_and_writes_visible_notice(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;

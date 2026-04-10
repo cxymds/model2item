@@ -7,7 +7,10 @@ use uuid::Uuid;
 use crate::{
     error::AppError,
     models::{
-        comparison_run::{ComparisonRunRecord, ComparisonTargetRecord, CreateComparisonRunInput},
+        comparison_run::{
+            ComparisonMessageRecord, ComparisonRunRecord, ComparisonTargetRecord,
+            CreateComparisonRunInput,
+        },
         evaluation_case::EvaluationCaseRecord,
     },
 };
@@ -88,6 +91,13 @@ impl ComparisonRunService {
             return Err(AppError::InvalidInput(
                 "comparison run requires at least one target id".to_string(),
             ));
+        }
+
+        if let Some(active_run) = self.get_active_comparison_run().await? {
+            return Err(AppError::InvalidInput(format!(
+                "an active comparison run already exists: {}",
+                active_run.title
+            )));
         }
 
         let mut tx = self.pool.begin().await?;
@@ -180,6 +190,21 @@ impl ComparisonRunService {
         self.get_comparison_run(&run_id).await
     }
 
+    pub async fn get_active_comparison_run(&self) -> Result<Option<ComparisonRunRecord>, AppError> {
+        let row = sqlx::query_as::<_, ComparisonRunRecord>(
+            r#"
+            SELECT *
+            FROM comparison_runs
+            WHERE status IN ('queued', 'running')
+            ORDER BY datetime(created_at) DESC, rowid DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row)
+    }
+
     pub async fn get_comparison_run(&self, run_id: &str) -> Result<ComparisonRunRecord, AppError> {
         let row = sqlx::query_as::<_, ComparisonRunRecord>(
             "SELECT * FROM comparison_runs WHERE id = ? LIMIT 1",
@@ -250,6 +275,30 @@ impl ComparisonRunService {
             "#,
         )
         .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn list_target_messages(
+        &self,
+        target_id: &str,
+    ) -> Result<Vec<ComparisonMessageRecord>, AppError> {
+        let rows = sqlx::query_as::<_, ComparisonMessageRecord>(
+            r#"
+            SELECT
+              id,
+              comparison_target_id,
+              role,
+              content,
+              message_type,
+              created_at
+            FROM messages
+            WHERE comparison_target_id = ?
+            ORDER BY datetime(created_at) ASC, rowid ASC
+            "#,
+        )
+        .bind(target_id)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows)

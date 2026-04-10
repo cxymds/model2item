@@ -32,6 +32,8 @@ pub struct ComparisonTargetRecord {
     pub success_status: Option<String>,
     pub error_category: Option<String>,
     pub error_detail: Option<String>,
+    pub latest_message_role: Option<String>,
+    pub latest_message_content: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +84,8 @@ pub struct ComparisonTargetResponse {
     pub success_status: Option<String>,
     pub error_category: Option<String>,
     pub error_detail: Option<String>,
+    pub latest_message_role: Option<String>,
+    pub latest_message_content: Option<String>,
 }
 
 impl From<ComparisonTargetRecord> for ComparisonTargetResponse {
@@ -102,6 +106,8 @@ impl From<ComparisonTargetRecord> for ComparisonTargetResponse {
             success_status: value.success_status,
             error_category: value.error_category,
             error_detail: value.error_detail,
+            latest_message_role: value.latest_message_role,
+            latest_message_content: value.latest_message_content,
         }
     }
 }
@@ -136,4 +142,37 @@ pub struct ComparisonSummaryResponse {
     pub longest_target_id: Option<String>,
     pub queued_count: usize,
     pub summary_text: String,
+}
+
+#[derive(Debug, Clone, FromRow)]
+pub struct ComparisonMessageRecord {
+    pub id: String,
+    pub comparison_target_id: String,
+    pub role: String,
+    pub content: String,
+    pub message_type: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ComparisonMessageResponse {
+    pub id: String,
+    pub comparison_target_id: String,
+    pub role: String,
+    pub content: String,
+    pub message_type: String,
+    pub created_at: String,
+}
+
+impl From<ComparisonMessageRecord> for ComparisonMessageResponse {
+    fn from(value: ComparisonMessageRecord) -> Self {
+        Self {
+            id: value.id,
+            comparison_target_id: value.comparison_target_id,
+            role: value.role,
+            content: value.content,
+            message_type: value.message_type,
+            created_at: value.created_at,
+        }
+    }
 }

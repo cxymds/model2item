@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import { TargetConfigPage } from "./TargetConfigPage";
 
-const { updateWindowBinding, deleteWindowBinding } = vi.hoisted(() => {
+const { updateWindowBinding, deleteWindowBinding, updateProfile, deleteProfile } = vi.hoisted(() => {
   return {
     updateWindowBinding: vi.fn().mockResolvedValue({
       id: "binding-1",
@@ -17,12 +17,28 @@ const { updateWindowBinding, deleteWindowBinding } = vi.hoisted(() => {
     deleteWindowBinding: vi
       .fn()
       .mockRejectedValue(new Error("已被运行任务引用，暂时不能删除")),
+    updateProfile: vi.fn().mockResolvedValue({
+      id: "profile-1",
+      name: "GPT-5.4 updated",
+      provider: "openai",
+      model_name: "gpt-5.4-mini",
+      base_url: "https://api.example.com/v2",
+      system_prompt: "",
+      temperature: null,
+      max_tokens: null,
+      extra_params_json: "{}",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-02T00:00:00Z",
+    }),
+    deleteProfile: vi.fn().mockResolvedValue(undefined),
   };
 });
 
 vi.mock("../../../lib/tauri", () => {
   return {
     createProfile: vi.fn(),
+    updateProfile,
+    deleteProfile,
     createWindowBinding: vi.fn(),
     updateWindowBinding,
     deleteWindowBinding,
@@ -135,5 +151,45 @@ describe("TargetConfigPage", () => {
     await screen.findByText("已被运行任务引用，暂时不能删除");
     expect(deleteWindowBinding).toHaveBeenCalled();
     expect(deleteWindowBinding.mock.calls[0]?.[0]).toBe("binding-1");
+  });
+
+  it("updates an existing profile", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑配置 GPT-5.4 baseline" }));
+    fireEvent.change(screen.getByDisplayValue("GPT-5.4 baseline"), {
+      target: { value: "GPT-5.4 updated" },
+    });
+    fireEvent.change(screen.getByDisplayValue("gpt-5.4"), {
+      target: { value: "gpt-5.4-mini" },
+    });
+    fireEvent.change(screen.getByDisplayValue("https://api.example.com/v1"), {
+      target: { value: "https://api.example.com/v2" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("留空则保持当前密钥"), {
+      target: { value: "new-secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
+
+    await waitFor(() => {
+      expect(updateProfile).toHaveBeenCalledWith("profile-1", {
+        name: "GPT-5.4 updated",
+        provider: "openai",
+        model_name: "gpt-5.4-mini",
+        base_url: "https://api.example.com/v2",
+        api_key: "new-secret",
+      });
+    });
+  });
+
+  it("deletes an unused profile", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "删除配置 GPT-5.4 baseline" }));
+
+    await waitFor(() => {
+      expect(deleteProfile.mock.calls[0]?.[0]).toBe("profile-1");
+    });
   });
 });

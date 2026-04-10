@@ -1,8 +1,37 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 import { RunMonitorPage } from "./RunMonitorPage";
+
+const { sendComparisonRunMessageMock } = vi.hoisted(() => {
+  return {
+    sendComparisonRunMessageMock: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+const { listTargetMessagesMock } = vi.hoisted(() => {
+  return {
+    listTargetMessagesMock: vi.fn().mockResolvedValue([
+      {
+        id: "msg-1",
+        comparison_target_id: "target-1",
+        role: "user",
+        content: "先总结整体结构",
+        message_type: "prompt",
+        created_at: "2026-01-01T00:00:01Z",
+      },
+      {
+        id: "msg-2",
+        comparison_target_id: "target-1",
+        role: "assistant",
+        content: "这是完整会话日志里的模型回答。",
+        message_type: "response",
+        created_at: "2026-01-01T00:00:03Z",
+      },
+    ]),
+  };
+});
 
 vi.mock("../../../lib/tauri", () => {
   return {
@@ -36,15 +65,21 @@ vi.mock("../../../lib/tauri", () => {
         success_status: null,
         error_category: null,
         error_detail: null,
+        latest_message_role: "assistant",
+        latest_message_content: "最新窗口输出：已经进入交互式 Claude 会话。",
       },
     ]),
     startComparisonRun: vi.fn().mockResolvedValue(undefined),
+    sendComparisonRunMessage: sendComparisonRunMessageMock,
+    listTargetMessages: listTargetMessagesMock,
   };
 });
 
 describe("RunMonitorPage", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    sendComparisonRunMessageMock.mockClear();
+    listTargetMessagesMock.mockClear();
   });
 
   it("stores the current run so users can return after navigating away", async () => {
@@ -71,5 +106,76 @@ describe("RunMonitorPage", () => {
         status: "running",
       });
     });
+  });
+
+  it("renders the latest target output preview", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/runs/run-1"]}>
+        <QueryClientProvider client={queryClient}>
+          <Routes>
+            <Route path="/runs/:runId" element={<RunMonitorPage />} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("最新输出")).toBeInTheDocument();
+    expect(screen.getByText("最新窗口输出：已经进入交互式 Claude 会话。")).toBeInTheDocument();
+  });
+
+  it("broadcasts follow-up prompts to the active run", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/runs/run-1"]}>
+        <QueryClientProvider client={queryClient}>
+          <Routes>
+            <Route path="/runs/:runId" element={<RunMonitorPage />} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(
+      await screen.findByPlaceholderText("继续分析异常分支，并比较每个窗口的解释差异"),
+      {
+        target: { value: "继续比较边界条件" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "发送到所有窗口" }));
+
+    await waitFor(() => {
+      expect(sendComparisonRunMessageMock).toHaveBeenCalledWith("run-1", "继续比较边界条件");
+    });
+  });
+
+  it("loads the full conversation drawer for a target", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/runs/run-1"]}>
+        <QueryClientProvider client={queryClient}>
+          <Routes>
+            <Route path="/runs/:runId" element={<RunMonitorPage />} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "展开完整日志" }));
+
+    await waitFor(() => {
+      expect(listTargetMessagesMock).toHaveBeenCalledWith("target-1");
+    });
+    expect(await screen.findByText("这是完整会话日志里的模型回答。")).toBeInTheDocument();
+    expect(screen.getByText("先总结整体结构")).toBeInTheDocument();
   });
 });

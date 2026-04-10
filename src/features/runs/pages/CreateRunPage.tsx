@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   createComparisonRun,
+  listComparisonRuns,
   listEvaluationCases,
   listItermSessions,
   listWindowBindings,
@@ -10,6 +11,7 @@ import {
   startComparisonRun,
 } from "../../../lib/tauri";
 import type { CreateComparisonRunInput } from "../../../types/api";
+import { saveRecentRun } from "../lib/recentRun";
 
 const initialDraft: CreateComparisonRunInput = {
   evaluation_case_id: "",
@@ -22,6 +24,11 @@ export function CreateRunPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<CreateComparisonRunInput>(initialDraft);
+  const runsQuery = useQuery({
+    queryKey: ["comparison-runs"],
+    queryFn: listComparisonRuns,
+    refetchInterval: 2000,
+  });
 
   const casesQuery = useQuery({
     queryKey: ["evaluation-cases"],
@@ -78,6 +85,38 @@ export function CreateRunPage() {
       };
     });
   }, [bindingsQuery.data, onlineSessionIds]);
+  const activeRun = useMemo(() => {
+    return (runsQuery.data ?? []).find((run) => run.status === "queued" || run.status === "running") ?? null;
+  }, [runsQuery.data]);
+
+  useEffect(() => {
+    if (!activeRun) return;
+
+    saveRecentRun({
+      id: activeRun.id,
+      title: activeRun.title,
+      status: activeRun.status,
+    });
+  }, [activeRun]);
+
+  if (activeRun) {
+    return (
+      <section className="page stack-block">
+        <header className="section-header">
+          <h2>当前正在进行的任务</h2>
+          <p>系统当前只允许一个运行任务，请先回到正在执行的任务。</p>
+        </header>
+
+        <article className="status-card">
+          <h3>{activeRun.title}</h3>
+          <p>状态：{activeRun.status}</p>
+          <Link aria-label="查看当前任务" className="primary-btn" to={`/runs/${activeRun.id}`}>
+            查看当前任务
+          </Link>
+        </article>
+      </section>
+    );
+  }
 
   return (
     <section className="page stack-block">

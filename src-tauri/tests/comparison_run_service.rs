@@ -314,7 +314,7 @@ async fn lists_recent_comparison_runs_in_descending_order_with_limit(
     let mut created_titles = Vec::new();
     for index in 0..22 {
         let title = format!("Run {index:02}");
-        run_service
+        let run = run_service
             .create_comparison_run(CreateComparisonRunInput {
                 evaluation_case_id: case.id.clone(),
                 title: title.clone(),
@@ -322,6 +322,7 @@ async fn lists_recent_comparison_runs_in_descending_order_with_limit(
                 notes: None,
             })
             .await?;
+        run_service.finalize_run(&run.id, "done").await?;
         created_titles.push(title);
     }
 
@@ -330,13 +331,13 @@ async fn lists_recent_comparison_runs_in_descending_order_with_limit(
     assert_eq!(listed_runs.len(), 20);
     assert_eq!(listed_runs[0].title, "Run 21");
     assert_eq!(listed_runs[19].title, "Run 02");
-    assert_eq!(listed_runs[0].status, "queued");
+    assert_eq!(listed_runs[0].status, "done");
 
     Ok(())
 }
 
 #[tokio::test]
-async fn reconciles_closed_sessions_for_queued_and_running_targets(
+async fn reconciles_closed_sessions_for_queued_and_running_targets_in_one_active_run(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
     let profile_service =
@@ -380,39 +381,29 @@ async fn reconciles_closed_sessions_for_queued_and_running_targets(
         })
         .await?;
 
-    let queued_run = run_service
+    let run = run_service
         .create_comparison_run(CreateComparisonRunInput {
             evaluation_case_id: case.id.clone(),
-            title: "Queued run".to_string(),
-            target_ids: vec![queued_binding.id.clone()],
+            title: "Mixed state run".to_string(),
+            target_ids: vec![queued_binding.id.clone(), running_binding.id.clone()],
             notes: None,
         })
         .await?;
 
-    let running_run = run_service
-        .create_comparison_run(CreateComparisonRunInput {
-            evaluation_case_id: case.id,
-            title: "Running run".to_string(),
-            target_ids: vec![running_binding.id.clone()],
-            notes: None,
-        })
-        .await?;
-
-    run_service.mark_run_started(&running_run.id).await?;
-    let running_target_id = run_service.list_comparison_targets(&running_run.id).await?[0]
-        .id
-        .clone();
+    run_service.mark_run_started(&run.id).await?;
+    let targets_before = run_service.list_comparison_targets(&run.id).await?;
+    let running_target_id = targets_before[1].id.clone();
     run_service.mark_target_running(&running_target_id).await?;
 
     run_service
         .reconcile_closed_sessions(&["session-still-online".to_string()])
         .await?;
 
-    let queued_run_after = run_service.get_comparison_run(&queued_run.id).await?;
-    assert_eq!(queued_run_after.status, "failed");
-    assert!(queued_run_after.finished_at.is_some());
+    let run_after = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(run_after.status, "failed");
+    assert!(run_after.finished_at.is_some());
 
-    let queued_targets = run_service.list_comparison_targets(&queued_run.id).await?;
+    let queued_targets = run_service.list_comparison_targets(&run.id).await?;
     assert_eq!(queued_targets[0].status, "failed");
     assert_eq!(
         queued_targets[0].error_category.as_deref(),
@@ -424,17 +415,12 @@ async fn reconciles_closed_sessions_for_queued_and_running_targets(
         .unwrap_or_default()
         .contains("session-queued-closed"));
 
-    let running_run_after = run_service.get_comparison_run(&running_run.id).await?;
-    assert_eq!(running_run_after.status, "failed");
-    assert!(running_run_after.finished_at.is_some());
-
-    let running_targets = run_service.list_comparison_targets(&running_run.id).await?;
-    assert_eq!(running_targets[0].status, "failed");
+    assert_eq!(queued_targets[1].status, "failed");
     assert_eq!(
-        running_targets[0].error_category.as_deref(),
+        queued_targets[1].error_category.as_deref(),
         Some("session_closed")
     );
-    assert!(running_targets[0]
+    assert!(queued_targets[1]
         .error_detail
         .as_deref()
         .unwrap_or_default()

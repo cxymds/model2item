@@ -1,17 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   createProfile,
   createWindowBinding,
+  deleteProfile,
   deleteWindowBinding,
   listItermSessions,
   listProfiles,
   listWindowBindings,
   refreshWindowBindingPresence,
+  updateProfile,
   updateWindowBinding,
 } from "../../../lib/tauri";
 import { formatDateTime } from "../../../lib/formatters";
 import { ProfileForm } from "../components/ProfileForm";
 import { WindowBindingList } from "../components/WindowBindingList";
+import type { UpdateProfileInput } from "../../../types/api";
 
 function getErrorMessage(error: unknown) {
   const message = String(error);
@@ -20,6 +24,14 @@ function getErrorMessage(error: unknown) {
 
 export function TargetConfigPage() {
   const queryClient = useQueryClient();
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [editingProfileForm, setEditingProfileForm] = useState<UpdateProfileInput>({
+    name: "",
+    provider: "",
+    model_name: "",
+    base_url: "",
+    api_key: "",
+  });
   const profilesQuery = useQuery({
     queryKey: ["profiles"],
     queryFn: listProfiles,
@@ -37,6 +49,25 @@ export function TargetConfigPage() {
     mutationFn: createProfile,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["profiles"] });
+    },
+  });
+  const updateProfileMutation = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: UpdateProfileInput }) =>
+      updateProfile(id, input),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["window-bindings"] }),
+      ]);
+    },
+  });
+  const deleteProfileMutation = useMutation({
+    mutationFn: deleteProfile,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["profiles"] }),
+        queryClient.invalidateQueries({ queryKey: ["window-bindings"] }),
+      ]);
     },
   });
 
@@ -102,15 +133,144 @@ export function TargetConfigPage() {
             <ul className="card-list">
               {profilesQuery.data.map((profile) => (
                 <li className="data-card" key={profile.id}>
-                  <strong>{profile.name}</strong>
-                  <span>
-                    {profile.provider} / {profile.model_name}
-                  </span>
-                  <span>{profile.base_url}</span>
-                  <span>更新时间：{formatDateTime(profile.updated_at)}</span>
+                  {editingProfileId === profile.id ? (
+                    <>
+                      <label className="field">
+                        <span>名称</span>
+                        <input
+                          value={editingProfileForm.name}
+                          onChange={(event) => {
+                            setEditingProfileForm((current) => ({
+                              ...current,
+                              name: event.target.value,
+                            }));
+                          }}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>提供方</span>
+                        <input
+                          value={editingProfileForm.provider}
+                          onChange={(event) => {
+                            setEditingProfileForm((current) => ({
+                              ...current,
+                              provider: event.target.value,
+                            }));
+                          }}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>模型名称</span>
+                        <input
+                          value={editingProfileForm.model_name}
+                          onChange={(event) => {
+                            setEditingProfileForm((current) => ({
+                              ...current,
+                              model_name: event.target.value,
+                            }));
+                          }}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>基础地址</span>
+                        <input
+                          value={editingProfileForm.base_url}
+                          onChange={(event) => {
+                            setEditingProfileForm((current) => ({
+                              ...current,
+                              base_url: event.target.value,
+                            }));
+                          }}
+                        />
+                      </label>
+                      <label className="field">
+                        <span>新 API key</span>
+                        <input
+                          placeholder="留空则保持当前密钥"
+                          type="password"
+                          value={editingProfileForm.api_key}
+                          onChange={(event) => {
+                            setEditingProfileForm((current) => ({
+                              ...current,
+                              api_key: event.target.value,
+                            }));
+                          }}
+                        />
+                      </label>
+                      <div className="stack-inline">
+                        <button
+                          className="primary-btn"
+                          disabled={updateProfileMutation.isPending}
+                          onClick={() => {
+                            updateProfileMutation.mutate({
+                              id: profile.id,
+                              input: editingProfileForm,
+                            });
+                            setEditingProfileId(null);
+                          }}
+                          type="button"
+                        >
+                          保存配置
+                        </button>
+                        <button
+                          className="ghost-btn"
+                          onClick={() => {
+                            setEditingProfileId(null);
+                          }}
+                          type="button"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{profile.name}</strong>
+                      <span>
+                        {profile.provider} / {profile.model_name}
+                      </span>
+                      <span>{profile.base_url}</span>
+                      <span>更新时间：{formatDateTime(profile.updated_at)}</span>
+                      <div className="stack-inline">
+                        <button
+                          className="ghost-btn"
+                          onClick={() => {
+                            setEditingProfileId(profile.id);
+                            setEditingProfileForm({
+                              name: profile.name,
+                              provider: profile.provider,
+                              model_name: profile.model_name,
+                              base_url: profile.base_url,
+                              api_key: "",
+                            });
+                          }}
+                          type="button"
+                        >
+                          编辑配置 {profile.name}
+                        </button>
+                        <button
+                          className="ghost-btn"
+                          disabled={deleteProfileMutation.isPending}
+                          onClick={() => {
+                            if (!window.confirm(`确认删除配置“${profile.name}”吗？`)) return;
+                            deleteProfileMutation.mutate(profile.id);
+                          }}
+                          type="button"
+                        >
+                          删除配置 {profile.name}
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
+          ) : null}
+          {updateProfileMutation.isError ? (
+            <p className="error-text">更新配置失败。{getErrorMessage(updateProfileMutation.error)}</p>
+          ) : null}
+          {deleteProfileMutation.isError ? (
+            <p className="error-text">删除配置失败。{getErrorMessage(deleteProfileMutation.error)}</p>
           ) : null}
         </div>
 

@@ -260,6 +260,45 @@ body {
   background: rgba(15, 23, 42, 0.72);
 }
 
+.message-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.message-bubble {
+  border-radius: 10px;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.message-bubble.user {
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.message-bubble.assistant {
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.message-bubble.system {
+  background: rgba(244, 63, 94, 0.12);
+}
+
+.message-bubble strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #dce8ff;
+}
+
+.message-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #d6deee;
+}
+
 .status-card h4 {
   margin: 0 0 6px;
 }
