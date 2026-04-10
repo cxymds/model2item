@@ -49,18 +49,18 @@ export function createComparisonRun(input: CreateComparisonRunInput) {
   return core.invoke<ComparisonRunResponse>("create_comparison_run", { input });
 }
 
-export function startComparisonRun(run_id: string) {
-  return core.invoke<void>("start_comparison_run", { run_id });
+export function startComparisonRun(runId: string) {
+  return core.invoke<void>("start_comparison_run", { runId });
 }
 
-export function getComparisonRun(run_id: string) {
-  return core.invoke<ComparisonRunResponse>("get_comparison_run", { run_id });
+export function getComparisonRun(runId: string) {
+  return core.invoke<ComparisonRunResponse>("get_comparison_run", { runId });
 }
 
-export function listComparisonTargets(run_id: string) {
-  return core.invoke<ComparisonTargetResponse[]>("list_comparison_targets", { run_id });
+export function listComparisonTargets(runId: string) {
+  return core.invoke<ComparisonTargetResponse[]>("list_comparison_targets", { runId });
 }
 
-export function getComparisonSummary(run_id: string) {
-  return core.invoke<ComparisonSummaryResponse>("get_comparison_summary", { run_id });
+export function getComparisonSummary(runId: string) {
+  return core.invoke<ComparisonSummaryResponse>("get_comparison_summary", { runId });
 }
