@@ -74,11 +74,13 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             }
         }
 
-        if failed_count == 0 {
-            Ok(())
+        if failed_count > 0 {
+            self.run_service.finalize_run(run_id, "failed").await?;
         } else {
-            self.run_service.finalize_run(run_id, "failed").await
+            self.run_service.finalize_run_if_terminal(run_id).await?;
         }
+
+        Ok(())
     }
 
     pub async fn broadcast_message(&self, run_id: &str, prompt: &str) -> Result<(), AppError> {

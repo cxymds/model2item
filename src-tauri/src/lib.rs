@@ -11,7 +11,8 @@ use tauri::Manager;
 use tokio::time::{sleep, Duration};
 
 use crate::services::{
-    iterm_session_service::ItermSessionService, window_binding_service::WindowBindingService,
+    comparison_run_service::ComparisonRunService, iterm_session_service::ItermSessionService,
+    window_binding_service::WindowBindingService,
 };
 
 fn workbench_database_path(base_dir: PathBuf) -> PathBuf {
@@ -21,19 +22,20 @@ fn workbench_database_path(base_dir: PathBuf) -> PathBuf {
 fn spawn_window_binding_sync_task(pool: sqlx::SqlitePool) {
     tauri::async_runtime::spawn(async move {
         let session_service = ItermSessionService::new();
-        let binding_service = WindowBindingService::new(pool);
+        let binding_service = WindowBindingService::new(pool.clone());
+        let run_service = ComparisonRunService::new(pool);
 
         loop {
             match session_service.list_sessions().await {
                 Ok(sessions) => {
+                    let online_session_ids = sessions
+                        .iter()
+                        .map(|session| session.session_id.clone())
+                        .collect::<Vec<_>>();
                     let _ = binding_service
-                        .sync_with_online_sessions(
-                            &sessions
-                                .iter()
-                                .map(|session| session.session_id.clone())
-                                .collect::<Vec<_>>(),
-                        )
+                        .sync_with_online_sessions(&online_session_ids)
                         .await;
+                    let _ = run_service.reconcile_closed_sessions(&online_session_ids).await;
                 }
                 Err(_) => {}
             }

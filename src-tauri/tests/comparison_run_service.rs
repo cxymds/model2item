@@ -142,6 +142,67 @@ async fn rejects_comparison_run_with_empty_target_ids() -> Result<(), Box<dyn st
 }
 
 #[tokio::test]
+async fn rejects_creating_a_second_active_comparison_run(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let profile_service =
+        ProfileService::with_secret_store(pool.clone(), Arc::new(MemorySecretStore::default()));
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Legacy parser review".to_string(),
+            prompt: "Explain the code path".to_string(),
+            context_payload: "{\"files\":[\"parser.rs\"]}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-1".to_string(),
+            display_name: "Window A".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let first_run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id.clone(),
+            title: "First run".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    let second_run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Second run".to_string(),
+            target_ids: vec![binding.id],
+            notes: None,
+        })
+        .await;
+
+    assert_eq!(first_run.status, "queued");
+    assert!(matches!(second_run, Err(AppError::InvalidInput(_))));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn deduplicates_duplicate_target_ids_and_keeps_input_order(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
@@ -270,6 +331,114 @@ async fn lists_recent_comparison_runs_in_descending_order_with_limit(
     assert_eq!(listed_runs[0].title, "Run 21");
     assert_eq!(listed_runs[19].title, "Run 02");
     assert_eq!(listed_runs[0].status, "queued");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn reconciles_closed_sessions_for_queued_and_running_targets(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let profile_service =
+        ProfileService::with_secret_store(pool.clone(), Arc::new(MemorySecretStore::default()));
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Legacy parser review".to_string(),
+            prompt: "Explain the code path".to_string(),
+            context_payload: "{\"files\":[\"parser.rs\"]}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let queued_binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-queued-closed".to_string(),
+            display_name: "Window Queued".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let running_binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-running-closed".to_string(),
+            display_name: "Window Running".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let queued_run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id.clone(),
+            title: "Queued run".to_string(),
+            target_ids: vec![queued_binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    let running_run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Running run".to_string(),
+            target_ids: vec![running_binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    run_service.mark_run_started(&running_run.id).await?;
+    let running_target_id = run_service.list_comparison_targets(&running_run.id).await?[0]
+        .id
+        .clone();
+    run_service.mark_target_running(&running_target_id).await?;
+
+    run_service
+        .reconcile_closed_sessions(&["session-still-online".to_string()])
+        .await?;
+
+    let queued_run_after = run_service.get_comparison_run(&queued_run.id).await?;
+    assert_eq!(queued_run_after.status, "failed");
+    assert!(queued_run_after.finished_at.is_some());
+
+    let queued_targets = run_service.list_comparison_targets(&queued_run.id).await?;
+    assert_eq!(queued_targets[0].status, "failed");
+    assert_eq!(
+        queued_targets[0].error_category.as_deref(),
+        Some("session_closed")
+    );
+    assert!(queued_targets[0]
+        .error_detail
+        .as_deref()
+        .unwrap_or_default()
+        .contains("session-queued-closed"));
+
+    let running_run_after = run_service.get_comparison_run(&running_run.id).await?;
+    assert_eq!(running_run_after.status, "failed");
+    assert!(running_run_after.finished_at.is_some());
+
+    let running_targets = run_service.list_comparison_targets(&running_run.id).await?;
+    assert_eq!(running_targets[0].status, "failed");
+    assert_eq!(
+        running_targets[0].error_category.as_deref(),
+        Some("session_closed")
+    );
+    assert!(running_targets[0]
+        .error_detail
+        .as_deref()
+        .unwrap_or_default()
+        .contains("session-running-closed"));
 
     Ok(())
 }

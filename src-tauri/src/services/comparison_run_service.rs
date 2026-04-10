@@ -1,6 +1,7 @@
 use chrono::Utc;
 use serde::Serialize;
 use sqlx::{FromRow, Row, SqlitePool};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::{
@@ -228,7 +229,21 @@ impl ComparisonRunService {
               response_lines,
               success_status,
               error_category,
-              error_detail
+              error_detail,
+              (
+                SELECT role
+                FROM messages m
+                WHERE m.comparison_target_id = comparison_targets.id
+                ORDER BY datetime(m.created_at) DESC, rowid DESC
+                LIMIT 1
+              ) AS latest_message_role,
+              (
+                SELECT content
+                FROM messages m
+                WHERE m.comparison_target_id = comparison_targets.id
+                ORDER BY datetime(m.created_at) DESC, rowid DESC
+                LIMIT 1
+              ) AS latest_message_content
             FROM comparison_targets
             WHERE run_id = ?
             ORDER BY position ASC, id ASC
@@ -470,6 +485,61 @@ impl ComparisonRunService {
             .await
     }
 
+    pub async fn reconcile_closed_sessions(
+        &self,
+        online_session_ids: &[String],
+    ) -> Result<(), AppError> {
+        let online_session_ids = online_session_ids.iter().cloned().collect::<HashSet<_>>();
+        let active_targets = sqlx::query_as::<_, ComparisonTargetExecutionRecord>(
+            r#"
+            SELECT
+              CAST(json_extract(ct.profile_snapshot_json, '$.position') AS INTEGER) AS position,
+              ct.id AS target_id,
+              ct.run_id AS run_id,
+              ct.window_binding_id AS window_binding_id,
+              wb.iterm_session_id AS iterm_session_id,
+              wb.display_name AS display_name,
+              mp.id AS profile_id,
+              mp.provider AS provider,
+              mp.model_name AS model_name,
+              mp.base_url AS base_url,
+              mp.api_key_encrypted AS api_key_locator,
+              mp.system_prompt AS system_prompt,
+              mp.extra_params_json AS extra_params_json
+            FROM comparison_targets ct
+            JOIN comparison_runs cr ON cr.id = ct.run_id
+            JOIN window_bindings wb ON wb.id = ct.window_binding_id
+            JOIN model_profiles mp ON mp.id = wb.profile_id
+            WHERE ct.status IN ('queued', 'running')
+              AND cr.status IN ('queued', 'running')
+            ORDER BY position ASC, ct.id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut affected_run_ids = HashSet::new();
+        for target in active_targets {
+            if online_session_ids.contains(&target.iterm_session_id) {
+                continue;
+            }
+
+            let detail = format!(
+                "iTerm session {} is no longer available",
+                target.iterm_session_id
+            );
+            self.mark_target_failed(&target.target_id, "session_closed", &detail)
+                .await?;
+            affected_run_ids.insert(target.run_id);
+        }
+
+        for run_id in affected_run_ids {
+            self.finalize_run_if_terminal(&run_id).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn finalize_run(&self, run_id: &str, status: &str) -> Result<(), AppError> {
         let now = Utc::now().to_rfc3339();
         sqlx::query(
@@ -485,6 +555,30 @@ impl ComparisonRunService {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    pub async fn finalize_run_if_terminal(&self, run_id: &str) -> Result<(), AppError> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+              SUM(CASE WHEN status IN ('queued', 'running') THEN 1 ELSE 0 END) AS active_count,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_count
+            FROM comparison_targets
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(run_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let active_count = row.try_get::<Option<i64>, _>("active_count")?.unwrap_or(0);
+        if active_count > 0 {
+            return Ok(());
+        }
+
+        let failed_count = row.try_get::<Option<i64>, _>("failed_count")?.unwrap_or(0);
+        let run_status = if failed_count > 0 { "failed" } else { "done" };
+        self.finalize_run(run_id, run_status).await
     }
 }
 

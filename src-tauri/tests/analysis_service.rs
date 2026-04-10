@@ -43,6 +43,8 @@ fn target(
         success_status: success_status.map(ToString::to_string),
         error_category: None,
         error_detail: None,
+        latest_message_role: None,
+        latest_message_content: None,
     }
 }
 
