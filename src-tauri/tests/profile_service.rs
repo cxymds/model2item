@@ -563,7 +563,30 @@ async fn creates_profile_with_execution_mode_and_normalizes_provider(
         .await?;
 
     assert_eq!(created.execution_mode, "openai_chat");
-    assert_eq!(created.provider, "openai");
+    assert_eq!(created.provider, "anthropic");
+    Ok(())
+}
+
+#[tokio::test]
+async fn preserves_custom_provider_for_claude_cli_profiles(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool, secret_store);
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "GLM via Claude CLI".to_string(),
+            provider: "openai-compatible".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "glm-4.5".to_string(),
+            base_url: "https://gateway.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+
+    assert_eq!(created.execution_mode, "claude_cli");
+    assert_eq!(created.provider, "openai-compatible");
     Ok(())
 }
 
@@ -585,7 +608,7 @@ async fn updates_execution_mode_and_normalizes_provider() -> Result<(), Box<dyn 
         })
         .await?;
     assert_eq!(created.execution_mode, "claude_cli");
-    assert_eq!(created.provider, "anthropic");
+    assert_eq!(created.provider, "openai");
 
     let updated = service
         .update_profile(
@@ -602,7 +625,46 @@ async fn updates_execution_mode_and_normalizes_provider() -> Result<(), Box<dyn 
         .await?;
 
     assert_eq!(updated.execution_mode, "openai_chat");
-    assert_eq!(updated.provider, "openai");
+    assert_eq!(updated.provider, "anthropic");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn updates_claude_cli_profile_without_overwriting_custom_provider(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool, secret_store);
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "GLM via Claude CLI".to_string(),
+            provider: "openai-compatible".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "glm-4.5".to_string(),
+            base_url: "https://gateway.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+
+    let updated = service
+        .update_profile(
+            &created.id,
+            UpdateProfileInput {
+                name: "GLM via Claude CLI Updated".to_string(),
+                provider: "openai-compatible".to_string(),
+                execution_mode: "claude_cli".to_string(),
+                model_name: "glm-4.5-air".to_string(),
+                base_url: "https://gateway.example.com/v2".to_string(),
+                api_key: "".to_string(),
+            },
+        )
+        .await?;
+
+    assert_eq!(updated.execution_mode, "claude_cli");
+    assert_eq!(updated.provider, "openai-compatible");
+    assert_eq!(updated.model_name, "glm-4.5-air");
 
     Ok(())
 }

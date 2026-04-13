@@ -31,7 +31,7 @@ export function ProfileForm({ isPending, onSubmit }: ProfileFormProps) {
         if (!form.name.trim() || !form.model_name.trim() || !form.api_key.trim()) return;
         onSubmit({
           ...form,
-          provider: PROVIDER_BY_EXECUTION_MODE[form.execution_mode],
+          provider: form.provider.trim() || PROVIDER_BY_EXECUTION_MODE[form.execution_mode],
         });
         setForm(initialState);
       }}
@@ -73,7 +73,9 @@ export function ProfileForm({ isPending, onSubmit }: ProfileFormProps) {
         <span>提供方</span>
         <input
           value={form.provider}
-          readOnly
+          onChange={(event) => {
+            setForm((current) => ({ ...current, provider: event.target.value }));
+          }}
           placeholder="openai"
           required
         />

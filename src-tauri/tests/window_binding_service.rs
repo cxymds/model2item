@@ -416,6 +416,50 @@ async fn applies_binding_to_window_session_and_writes_visible_notice(
 }
 
 #[tokio::test]
+async fn applies_openai_compatible_claude_cli_binding_with_profile_specific_env(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let adapter = RecordingAdapter::default();
+    let sync_service =
+        WindowBindingSyncService::with_dependencies(pool.clone(), adapter.clone(), secret_store);
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GLM via Claude CLI".to_string(),
+            provider: "openai-compatible".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "glm-4.5".to_string(),
+            base_url: "https://gateway.example.com/v1".to_string(),
+            api_key: "glm-secret".to_string(),
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-sync-openai".to_string(),
+            display_name: "Window Sync OpenAI".to_string(),
+            profile_id: profile.id,
+        })
+        .await?;
+
+    sync_service.apply_binding(&binding.id).await?;
+
+    let texts = adapter.texts.lock().expect("texts mutex");
+    assert_eq!(texts.len(), 1);
+    assert!(texts[0].1.contains("export OPENAI_API_KEY='glm-secret'"));
+    assert!(texts[0]
+        .1
+        .contains("export OPENAI_BASE_URL='https://gateway.example.com/v1'"));
+    assert!(texts[0].1.contains("export OPENAI_MODEL='glm-4.5'"));
+    assert!(!texts[0].1.contains("export ANTHROPIC_API_KEY"));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn rolls_back_created_binding_when_window_sync_fails(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;

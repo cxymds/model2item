@@ -202,7 +202,12 @@ export function TargetConfigPage() {
                         <span>提供方</span>
                         <input
                           value={editingProfileForm.provider}
-                          readOnly
+                          onChange={(event) => {
+                            setEditingProfileForm((current) => ({
+                              ...current,
+                              provider: event.target.value,
+                            }));
+                          }}
                         />
                       </label>
                       <label className="field">
@@ -214,7 +219,9 @@ export function TargetConfigPage() {
                             setEditingProfileForm((current) => ({
                               ...current,
                               execution_mode: executionMode,
-                              provider: PROVIDER_BY_EXECUTION_MODE[executionMode],
+                              provider:
+                                current.provider.trim() ||
+                                PROVIDER_BY_EXECUTION_MODE[executionMode],
                             }));
                           }}
                         >
@@ -307,7 +314,9 @@ export function TargetConfigPage() {
                               input: {
                                 ...editingProfileForm,
                                 execution_mode: executionMode,
-                                provider: PROVIDER_BY_EXECUTION_MODE[executionMode],
+                                provider:
+                                  editingProfileForm.provider.trim() ||
+                                  PROVIDER_BY_EXECUTION_MODE[executionMode],
                               },
                             });
                             setEditingProfileId(null);

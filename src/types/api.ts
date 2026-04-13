@@ -5,7 +5,7 @@ export const EXECUTION_MODE_OPTIONS = [
 
 export type ExecutionMode = (typeof EXECUTION_MODE_OPTIONS)[number]["value"];
 
-export type Provider = "anthropic" | "openai";
+export type Provider = string;
 
 export const PROVIDER_BY_EXECUTION_MODE: Record<ExecutionMode, Provider> = {
   claude_cli: "anthropic",

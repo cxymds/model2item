@@ -193,17 +193,12 @@ fn build_claude_cli_command(request: &ItermExecutionRequest) -> Result<BuiltComm
     let error_path = format!("{execution_root}/{sanitized_request_id}.err");
     let status_path = format!("{execution_root}/{sanitized_request_id}.status");
 
-    let mut environment = BTreeMap::new();
-    if !request.api_key.trim().is_empty() {
-        environment.insert("ANTHROPIC_API_KEY".to_string(), request.api_key.clone());
-        environment.insert("ANTHROPIC_AUTH_TOKEN".to_string(), request.api_key.clone());
-    }
-    if !request.base_url.trim().is_empty() {
-        environment.insert("ANTHROPIC_BASE_URL".to_string(), request.base_url.clone());
-    }
-    if !request.model_name.trim().is_empty() {
-        environment.insert("ANTHROPIC_MODEL".to_string(), request.model_name.clone());
-    }
+    let mut environment = provider_env_vars(
+        &request.provider,
+        &request.api_key,
+        &request.base_url,
+        &request.model_name,
+    );
     environment.extend(extras.env);
 
     let claude_executable = extras
@@ -267,27 +262,8 @@ pub fn build_binding_sync_command(
     api_key: &str,
 ) -> String {
     let mut commands = Vec::new();
-    if !api_key.trim().is_empty() {
-        commands.push(format!(
-            "export ANTHROPIC_API_KEY={}",
-            shell_escape(api_key)
-        ));
-        commands.push(format!(
-            "export ANTHROPIC_AUTH_TOKEN={}",
-            shell_escape(api_key)
-        ));
-    }
-    if !base_url.trim().is_empty() {
-        commands.push(format!(
-            "export ANTHROPIC_BASE_URL={}",
-            shell_escape(base_url)
-        ));
-    }
-    if !model_name.trim().is_empty() {
-        commands.push(format!(
-            "export ANTHROPIC_MODEL={}",
-            shell_escape(model_name)
-        ));
+    for (key, value) in provider_env_vars(provider, api_key, base_url, model_name) {
+        commands.push(format!("export {key}={}", shell_escape(&value)));
     }
     commands.push(format!(
         "printf '%s\\n' {}",
@@ -304,27 +280,13 @@ pub fn build_claude_cli_launch_command(request: &ItermExecutionRequest) -> Resul
     let extras = parse_claude_cli_extras(&request.extra_params_json)?;
     let mut commands = Vec::new();
 
-    if !request.api_key.trim().is_empty() {
-        commands.push(format!(
-            "export ANTHROPIC_API_KEY={}",
-            shell_escape(&request.api_key)
-        ));
-        commands.push(format!(
-            "export ANTHROPIC_AUTH_TOKEN={}",
-            shell_escape(&request.api_key)
-        ));
-    }
-    if !request.base_url.trim().is_empty() {
-        commands.push(format!(
-            "export ANTHROPIC_BASE_URL={}",
-            shell_escape(&request.base_url)
-        ));
-    }
-    if !request.model_name.trim().is_empty() {
-        commands.push(format!(
-            "export ANTHROPIC_MODEL={}",
-            shell_escape(&request.model_name)
-        ));
+    for (key, value) in provider_env_vars(
+        &request.provider,
+        &request.api_key,
+        &request.base_url,
+        &request.model_name,
+    ) {
+        commands.push(format!("export {key}={}", shell_escape(&value)));
     }
     for (key, value) in extras.env {
         commands.push(format!("export {key}={}", shell_escape(&value)));
@@ -361,6 +323,42 @@ fn execution_mode_label(execution_mode: &str) -> &'static str {
         "openai_chat" => "OpenAI Chat API",
         _ => "Claude Code",
     }
+}
+
+fn provider_env_vars(
+    provider: &str,
+    api_key: &str,
+    base_url: &str,
+    model_name: &str,
+) -> BTreeMap<String, String> {
+    let normalized_provider = provider.trim().to_ascii_lowercase();
+    let uses_anthropic_env = matches!(normalized_provider.as_str(), "" | "anthropic" | "claude");
+
+    let mut environment = BTreeMap::new();
+    if uses_anthropic_env {
+        if !api_key.trim().is_empty() {
+            environment.insert("ANTHROPIC_API_KEY".to_string(), api_key.to_string());
+            environment.insert("ANTHROPIC_AUTH_TOKEN".to_string(), api_key.to_string());
+        }
+        if !base_url.trim().is_empty() {
+            environment.insert("ANTHROPIC_BASE_URL".to_string(), base_url.to_string());
+        }
+        if !model_name.trim().is_empty() {
+            environment.insert("ANTHROPIC_MODEL".to_string(), model_name.to_string());
+        }
+    } else {
+        if !api_key.trim().is_empty() {
+            environment.insert("OPENAI_API_KEY".to_string(), api_key.to_string());
+        }
+        if !base_url.trim().is_empty() {
+            environment.insert("OPENAI_BASE_URL".to_string(), base_url.to_string());
+        }
+        if !model_name.trim().is_empty() {
+            environment.insert("OPENAI_MODEL".to_string(), model_name.to_string());
+        }
+    }
+
+    environment
 }
 
 fn parse_claude_cli_extras(raw: &str) -> Result<ClaudeCliExtras, String> {
@@ -593,6 +591,45 @@ mod tests {
 
         assert!(command.contains("via OpenAI Chat API"));
         assert!(!command.contains("via Claude Code"));
+    }
+
+    #[test]
+    fn binding_sync_command_uses_openai_env_for_openai_compatible_claude_cli() {
+        let command = build_binding_sync_command(
+            "GLM Profile",
+            "openai-compatible",
+            "glm-4.5",
+            "claude_cli",
+            "https://gateway.example.com/v1",
+            "glm-secret",
+        );
+
+        assert!(command.contains("export OPENAI_API_KEY='glm-secret'"));
+        assert!(command.contains("export OPENAI_BASE_URL='https://gateway.example.com/v1'"));
+        assert!(command.contains("export OPENAI_MODEL='glm-4.5'"));
+        assert!(!command.contains("export ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn launch_command_uses_openai_env_for_openai_compatible_claude_cli() {
+        let request = ItermExecutionRequest {
+            request_id: "launch-openai-compatible".to_string(),
+            session_id: "session-launch".to_string(),
+            prompt: "Ignored".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            provider: "openai-compatible".to_string(),
+            model_name: "glm-4.5".to_string(),
+            base_url: "https://gateway.example.com/v1".to_string(),
+            api_key: "glm-secret".to_string(),
+            system_prompt: String::new(),
+            extra_params_json: "{}".to_string(),
+        };
+
+        let command = build_claude_cli_launch_command(&request).expect("command should build");
+        assert!(command.contains("export OPENAI_API_KEY='glm-secret'"));
+        assert!(command.contains("export OPENAI_BASE_URL='https://gateway.example.com/v1'"));
+        assert!(command.contains("export OPENAI_MODEL='glm-4.5'"));
+        assert!(!command.contains("export ANTHROPIC_API_KEY"));
     }
 
     #[test]

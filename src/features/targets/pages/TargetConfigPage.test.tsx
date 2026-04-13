@@ -217,7 +217,7 @@ describe("TargetConfigPage", () => {
     await waitFor(() => {
       expect(updateProfile).toHaveBeenCalledWith("profile-1", {
         name: "GPT-5.4 updated",
-        provider: "anthropic",
+        provider: "openai",
         execution_mode: "claude_cli",
         model_name: "gpt-5.4-mini",
         base_url: "https://api.example.com/v2",
@@ -260,13 +260,16 @@ describe("TargetConfigPage", () => {
       target: { value: "Claude Sonnet" },
     });
     fireEvent.change(screen.getByLabelText("执行模式"), {
-      target: { value: "openai_chat" },
+      target: { value: "claude_cli" },
+    });
+    fireEvent.change(screen.getByLabelText("提供方"), {
+      target: { value: "openai-compatible" },
     });
     fireEvent.change(screen.getByPlaceholderText("gpt-5.4"), {
-      target: { value: "gpt-5.4-mini" },
+      target: { value: "glm-4.5" },
     });
     fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
-      target: { value: "https://api.openai.example.com" },
+      target: { value: "https://gateway.example.com/v1" },
     });
     fireEvent.change(screen.getByPlaceholderText("sk-..."), {
       target: { value: "secret-new" },
@@ -277,10 +280,10 @@ describe("TargetConfigPage", () => {
       expect(createProfile).toHaveBeenCalled();
       expect(createProfile.mock.calls[0]?.[0]).toEqual({
         name: "Claude Sonnet",
-        provider: "openai",
-        execution_mode: "openai_chat",
-        model_name: "gpt-5.4-mini",
-        base_url: "https://api.openai.example.com",
+        provider: "openai-compatible",
+        execution_mode: "claude_cli",
+        model_name: "glm-4.5",
+        base_url: "https://gateway.example.com/v1",
         api_key: "secret-new",
       });
     });

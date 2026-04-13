@@ -49,11 +49,18 @@ impl ProfileService {
         }
     }
 
-    fn provider_for_execution_mode(execution_mode: &str) -> &'static str {
+    fn normalize_provider(provider: &str, execution_mode: &str) -> String {
+        let trimmed_provider = provider.trim();
         if execution_mode == "openai_chat" {
-            "openai"
+            if trimmed_provider.is_empty() {
+                "openai".to_string()
+            } else {
+                trimmed_provider.to_string()
+            }
+        } else if trimmed_provider.is_empty() {
+            "anthropic".to_string()
         } else {
-            "anthropic"
+            trimmed_provider.to_string()
         }
     }
 
@@ -73,7 +80,7 @@ impl ProfileService {
         let now = Utc::now().to_rfc3339();
         let api_key_locator = profile_secret_locator(&id);
         let execution_mode = Self::normalize_execution_mode(&input.execution_mode);
-        let provider = Self::provider_for_execution_mode(execution_mode);
+        let provider = Self::normalize_provider(&input.provider, execution_mode);
         self.persist_secret(&api_key_locator, &input.api_key)?;
 
         sqlx::query(
@@ -85,7 +92,7 @@ impl ProfileService {
         )
         .bind(&id)
         .bind(&input.name)
-        .bind(provider)
+        .bind(&provider)
         .bind(execution_mode)
         .bind(&input.model_name)
         .bind(&input.base_url)
@@ -125,7 +132,7 @@ impl ProfileService {
         let now = Utc::now().to_rfc3339();
         let api_key_locator = profile_secret_locator(id);
         let execution_mode = Self::normalize_execution_mode(&input.execution_mode);
-        let provider = Self::provider_for_execution_mode(execution_mode);
+        let provider = Self::normalize_provider(&input.provider, execution_mode);
         if !input.api_key.trim().is_empty() {
             self.persist_secret(&api_key_locator, &input.api_key)?;
         }
@@ -145,7 +152,7 @@ impl ProfileService {
             "#,
         )
         .bind(&input.name)
-        .bind(provider)
+        .bind(&provider)
         .bind(execution_mode)
         .bind(&input.model_name)
         .bind(&input.base_url)
