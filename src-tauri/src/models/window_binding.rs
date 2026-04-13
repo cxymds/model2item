@@ -7,6 +7,7 @@ pub struct WindowBindingRecord {
     pub iterm_session_id: String,
     pub display_name: String,
     pub profile_id: String,
+    pub custom_provider_id: Option<String>,
     pub enabled: i64,
     pub last_seen_at: Option<String>,
     pub metadata_json: String,
@@ -18,6 +19,7 @@ pub struct WindowBindingResponse {
     pub iterm_session_id: String,
     pub display_name: String,
     pub profile_id: String,
+    pub custom_provider_id: Option<String>,
     pub enabled: i64,
     pub last_seen_at: Option<String>,
     pub metadata_json: String,
@@ -30,6 +32,7 @@ impl From<WindowBindingRecord> for WindowBindingResponse {
             iterm_session_id: value.iterm_session_id,
             display_name: value.display_name,
             profile_id: value.profile_id,
+            custom_provider_id: value.custom_provider_id,
             enabled: value.enabled,
             last_seen_at: value.last_seen_at,
             metadata_json: value.metadata_json,
@@ -42,6 +45,7 @@ pub struct CreateWindowBindingInput {
     pub iterm_session_id: String,
     pub display_name: String,
     pub profile_id: String,
+    pub custom_provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -49,4 +53,5 @@ pub struct UpdateWindowBindingInput {
     pub iterm_session_id: String,
     pub display_name: String,
     pub profile_id: String,
+    pub custom_provider_id: Option<String>,
 }

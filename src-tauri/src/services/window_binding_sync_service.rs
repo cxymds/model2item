@@ -4,7 +4,9 @@ use sqlx::{FromRow, SqlitePool};
 
 use crate::{
     error::AppError,
-    models::window_binding::{CreateWindowBindingInput, WindowBindingRecord},
+    models::window_binding::{
+        CreateWindowBindingInput, UpdateWindowBindingInput, WindowBindingRecord,
+    },
     services::{
         iterm_mcp_adapter::{
             build_binding_sync_command, classify_adapter_error, ItermMcpAdapter,
@@ -19,7 +21,7 @@ use crate::{
 struct BindingSyncRecord {
     iterm_session_id: String,
     display_name: String,
-    profile_name: String,
+    binding_name: String,
     provider: String,
     execution_mode: String,
     model_name: String,
@@ -47,7 +49,7 @@ impl WindowBindingSyncService<PythonItermMcpAdapter> {
 impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
     fn map_secret_lookup_error(
         target_display_name: &str,
-        profile_name: &str,
+        binding_name: &str,
         error: AppError,
     ) -> AppError {
         match error {
@@ -55,14 +57,14 @@ impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
                 if message.contains("No matching entry found in secure storage") =>
             {
                 AppError::InvalidInput(format!(
-                    "cannot apply binding for target `{target_display_name}` because profile `{profile_name}` is missing its saved API key in secure storage. Open that profile and re-save the API key, then try again."
+                    "cannot apply binding for target `{target_display_name}` because binding/provider `{binding_name}` is missing its saved API key in secure storage. Open that provider and re-save the API key, then try again."
                 ))
             }
             AppError::MissingDependency(message)
                 if message.contains("secret not found for locator") =>
             {
                 AppError::InvalidInput(format!(
-                    "cannot apply binding for target `{target_display_name}` because profile `{profile_name}` is missing its saved API key in secure storage. Open that profile and re-save the API key, then try again."
+                    "cannot apply binding for target `{target_display_name}` because binding/provider `{binding_name}` is missing its saved API key in secure storage. Open that provider and re-save the API key, then try again."
                 ))
             }
             other => other,
@@ -87,14 +89,15 @@ impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
             SELECT
               wb.iterm_session_id AS iterm_session_id,
               wb.display_name AS display_name,
-              mp.name AS profile_name,
-              mp.provider AS provider,
-              mp.execution_mode AS execution_mode,
-              mp.model_name AS model_name,
-              mp.base_url AS base_url,
-              mp.api_key_encrypted AS api_key_locator
+              COALESCE(cp.name, mp.name) AS binding_name,
+              COALESCE(cp.provider_key, mp.provider) AS provider,
+              COALESCE(cp.client_type, mp.execution_mode) AS execution_mode,
+              COALESCE(cp.default_model, mp.model_name) AS model_name,
+              COALESCE(cp.base_url, mp.base_url) AS base_url,
+              COALESCE(cp.api_key_encrypted, mp.api_key_encrypted) AS api_key_locator
             FROM window_bindings wb
-            JOIN model_profiles mp ON mp.id = wb.profile_id
+            LEFT JOIN custom_providers cp ON cp.id = wb.custom_provider_id
+            LEFT JOIN model_profiles mp ON mp.id = wb.profile_id
             WHERE wb.id = ?
             LIMIT 1
             "#,
@@ -110,10 +113,10 @@ impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
             .secret_store
             .get_secret(&record.api_key_locator)
             .map_err(|error| {
-                Self::map_secret_lookup_error(&record.display_name, &record.profile_name, error)
+                Self::map_secret_lookup_error(&record.display_name, &record.binding_name, error)
             })?;
         let command = build_binding_sync_command(
-            &record.profile_name,
+            &record.binding_name,
             &record.provider,
             &record.model_name,
             &record.execution_mode,
@@ -144,4 +147,30 @@ pub async fn create_window_binding_and_sync<A: ItermMcpAdapter>(
     }
 
     Ok(binding)
+}
+
+pub async fn update_window_binding_and_sync<A: ItermMcpAdapter>(
+    pool: SqlitePool,
+    adapter: A,
+    secret_store: Arc<dyn SecretStore>,
+    id: &str,
+    input: UpdateWindowBindingInput,
+) -> Result<WindowBindingRecord, AppError> {
+    let binding_service = WindowBindingService::new(pool.clone());
+    let previous = binding_service.get_window_binding(id).await?;
+    let updated = binding_service.update_window_binding(id, input).await?;
+    let sync_service = WindowBindingSyncService::with_dependencies(pool, adapter, secret_store);
+
+    if let Err(error) = sync_service.apply_binding(&updated.id).await {
+        let rollback_input = UpdateWindowBindingInput {
+            iterm_session_id: previous.iterm_session_id,
+            display_name: previous.display_name,
+            profile_id: previous.profile_id,
+            custom_provider_id: previous.custom_provider_id,
+        };
+        binding_service.update_window_binding(id, rollback_input).await?;
+        return Err(error);
+    }
+
+    Ok(updated)
 }

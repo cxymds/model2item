@@ -69,6 +69,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::custom_provider_commands::create_custom_provider,
+            commands::custom_provider_commands::list_custom_providers,
+            commands::custom_provider_commands::update_custom_provider,
+            commands::custom_provider_commands::delete_custom_provider,
             commands::profile_commands::create_profile,
             commands::profile_commands::list_profiles,
             commands::profile_commands::update_profile,

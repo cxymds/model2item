@@ -57,11 +57,44 @@ export type UpdateProfileInput = {
   api_key: string;
 };
 
+export type CustomProviderResponse = {
+  id: string;
+  name: string;
+  provider_key: string;
+  client_type: string;
+  base_url: string;
+  default_model: string;
+  extra_params_json: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateCustomProviderInput = {
+  name: string;
+  provider_key: string;
+  client_type: string;
+  base_url: string;
+  api_key: string;
+  default_model: string;
+  extra_params_json: string;
+};
+
+export type UpdateCustomProviderInput = {
+  name: string;
+  provider_key: string;
+  client_type: string;
+  base_url: string;
+  api_key: string;
+  default_model: string;
+  extra_params_json: string;
+};
+
 export type WindowBindingResponse = {
   id: string;
   iterm_session_id: string;
   display_name: string;
   profile_id: string;
+  custom_provider_id: string | null;
   enabled: number;
   last_seen_at: string | null;
   metadata_json: string;
@@ -80,12 +113,14 @@ export type CreateWindowBindingInput = {
   iterm_session_id: string;
   display_name: string;
   profile_id: string;
+  custom_provider_id?: string;
 };
 
 export type UpdateWindowBindingInput = {
   iterm_session_id: string;
   display_name: string;
   profile_id: string;
+  custom_provider_id?: string;
 };
 
 export type EvaluationCaseResponse = {

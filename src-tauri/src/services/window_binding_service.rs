@@ -19,22 +19,84 @@ impl WindowBindingService {
         Self { pool }
     }
 
+    const PROVIDER_BINDING_PROFILE_ID: &'static str = "__provider_binding_profile__";
+
+    async fn profile_exists(&self, profile_id: &str) -> Result<bool, AppError> {
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM model_profiles WHERE id = ?",
+        )
+        .bind(profile_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count > 0)
+    }
+
+    async fn ensure_provider_binding_profile(&self) -> Result<String, AppError> {
+        let now = Utc::now().to_rfc3339();
+        let profile_id = Self::PROVIDER_BINDING_PROFILE_ID.to_string();
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO model_profiles (
+              id, name, provider, execution_mode, model_name, base_url, api_key_encrypted, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&profile_id)
+        .bind("Provider Binding Placeholder")
+        .bind("openai-compatible")
+        .bind("claude_cli")
+        .bind("provider-binding-placeholder")
+        .bind("")
+        .bind("secret://profile/__provider_binding_profile__")
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(profile_id)
+    }
+
+    async fn resolve_profile_id_for_binding(
+        &self,
+        profile_id: &str,
+        custom_provider_id: Option<&str>,
+    ) -> Result<String, AppError> {
+        if custom_provider_id.is_none() {
+            return Ok(profile_id.to_string());
+        }
+
+        if !profile_id.is_empty() && self.profile_exists(profile_id).await? {
+            return Ok(profile_id.to_string());
+        }
+
+        self.ensure_provider_binding_profile().await
+    }
+
     pub async fn create_window_binding(
         &self,
         input: CreateWindowBindingInput,
     ) -> Result<WindowBindingRecord, AppError> {
         let id = Uuid::new_v4().to_string();
+        let resolved_profile_id = self
+            .resolve_profile_id_for_binding(
+                &input.profile_id,
+                input.custom_provider_id.as_deref(),
+            )
+            .await?;
 
         sqlx::query(
             r#"
-            INSERT INTO window_bindings (id, iterm_session_id, display_name, profile_id)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO window_bindings (id, iterm_session_id, display_name, profile_id, custom_provider_id)
+            VALUES (?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
         .bind(&input.iterm_session_id)
         .bind(&input.display_name)
-        .bind(&input.profile_id)
+        .bind(&resolved_profile_id)
+        .bind(&input.custom_provider_id)
         .execute(&self.pool)
         .await?;
 
@@ -65,24 +127,51 @@ impl WindowBindingService {
         id: &str,
         input: UpdateWindowBindingInput,
     ) -> Result<WindowBindingRecord, AppError> {
-        sqlx::query(
+        let resolved_profile_id = self
+            .resolve_profile_id_for_binding(
+                &input.profile_id,
+                input.custom_provider_id.as_deref(),
+            )
+            .await?;
+
+        let result = sqlx::query(
             r#"
             UPDATE window_bindings
-            SET iterm_session_id = ?, display_name = ?, profile_id = ?
+            SET iterm_session_id = ?, display_name = ?, profile_id = ?, custom_provider_id = ?
             WHERE id = ?
             "#,
         )
         .bind(&input.iterm_session_id)
         .bind(&input.display_name)
-        .bind(&input.profile_id)
+        .bind(&resolved_profile_id)
+        .bind(&input.custom_provider_id)
         .bind(id)
         .execute(&self.pool)
         .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::MissingDependency(format!(
+                "window binding {id} not found"
+            )));
+        }
 
         self.get_window_binding(id).await
     }
 
     pub async fn delete_window_binding(&self, id: &str) -> Result<(), AppError> {
+        let exists = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM window_bindings WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if exists == 0 {
+            return Err(AppError::MissingDependency(format!(
+                "window binding {id} not found"
+            )));
+        }
+
         let active_reference_count = sqlx::query_scalar::<_, i64>(
             r#"
             SELECT COUNT(1)

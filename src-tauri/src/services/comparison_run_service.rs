@@ -149,13 +149,14 @@ impl ComparisonRunService {
                 SELECT
                   wb.id AS binding_id,
                   wb.display_name AS display_name,
-                  mp.id AS profile_id,
-                  mp.provider AS provider,
-                  mp.execution_mode AS execution_mode,
-                  mp.model_name AS model_name,
-                  mp.base_url AS base_url
+                  COALESCE(cp.id, mp.id) AS profile_id,
+                  COALESCE(cp.provider_key, mp.provider) AS provider,
+                  COALESCE(cp.client_type, mp.execution_mode) AS execution_mode,
+                  COALESCE(cp.default_model, mp.model_name) AS model_name,
+                  COALESCE(cp.base_url, mp.base_url) AS base_url
                 FROM window_bindings wb
-                JOIN model_profiles mp ON mp.id = wb.profile_id
+                LEFT JOIN custom_providers cp ON cp.id = wb.custom_provider_id
+                LEFT JOIN model_profiles mp ON mp.id = wb.profile_id
                 WHERE wb.id = ?
                 LIMIT 1
                 "#,
@@ -325,18 +326,19 @@ impl ComparisonRunService {
               ct.window_binding_id AS window_binding_id,
               wb.iterm_session_id AS iterm_session_id,
               wb.display_name AS display_name,
-              mp.id AS profile_id,
-              mp.name AS profile_name,
-              mp.provider AS provider,
-              mp.execution_mode AS execution_mode,
-              mp.model_name AS model_name,
-              mp.base_url AS base_url,
-              mp.api_key_encrypted AS api_key_locator,
+              COALESCE(cp.id, mp.id) AS profile_id,
+              COALESCE(cp.name, mp.name) AS profile_name,
+              COALESCE(cp.provider_key, mp.provider) AS provider,
+              COALESCE(cp.client_type, mp.execution_mode) AS execution_mode,
+              COALESCE(cp.default_model, mp.model_name) AS model_name,
+              COALESCE(cp.base_url, mp.base_url) AS base_url,
+              COALESCE(cp.api_key_encrypted, mp.api_key_encrypted) AS api_key_locator,
               mp.system_prompt AS system_prompt,
-              mp.extra_params_json AS extra_params_json
+              COALESCE(cp.extra_params_json, mp.extra_params_json) AS extra_params_json
             FROM comparison_targets ct
             JOIN window_bindings wb ON wb.id = ct.window_binding_id
-            JOIN model_profiles mp ON mp.id = wb.profile_id
+            LEFT JOIN custom_providers cp ON cp.id = wb.custom_provider_id
+            LEFT JOIN model_profiles mp ON mp.id = wb.profile_id
             WHERE ct.run_id = ?
             ORDER BY position ASC, ct.id ASC
             "#,
@@ -360,18 +362,19 @@ impl ComparisonRunService {
               ct.window_binding_id AS window_binding_id,
               wb.iterm_session_id AS iterm_session_id,
               wb.display_name AS display_name,
-              mp.id AS profile_id,
-              mp.name AS profile_name,
-              mp.provider AS provider,
-              mp.execution_mode AS execution_mode,
-              mp.model_name AS model_name,
-              mp.base_url AS base_url,
-              mp.api_key_encrypted AS api_key_locator,
+              COALESCE(cp.id, mp.id) AS profile_id,
+              COALESCE(cp.name, mp.name) AS profile_name,
+              COALESCE(cp.provider_key, mp.provider) AS provider,
+              COALESCE(cp.client_type, mp.execution_mode) AS execution_mode,
+              COALESCE(cp.default_model, mp.model_name) AS model_name,
+              COALESCE(cp.base_url, mp.base_url) AS base_url,
+              COALESCE(cp.api_key_encrypted, mp.api_key_encrypted) AS api_key_locator,
               mp.system_prompt AS system_prompt,
-              mp.extra_params_json AS extra_params_json
+              COALESCE(cp.extra_params_json, mp.extra_params_json) AS extra_params_json
             FROM comparison_targets ct
             JOIN window_bindings wb ON wb.id = ct.window_binding_id
-            JOIN model_profiles mp ON mp.id = wb.profile_id
+            LEFT JOIN custom_providers cp ON cp.id = wb.custom_provider_id
+            LEFT JOIN model_profiles mp ON mp.id = wb.profile_id
             WHERE ct.run_id = ? AND ct.status = 'running'
             ORDER BY position ASC, ct.id ASC
             "#,
@@ -403,7 +406,7 @@ impl ComparisonRunService {
         sqlx::query(
             r#"
             UPDATE comparison_targets
-            SET status = 'running', sent_at = COALESCE(sent_at, ?)
+            SET status = 'running', success_status = 'streaming', sent_at = COALESCE(sent_at, ?)
             WHERE id = ?
             "#,
         )
@@ -560,19 +563,20 @@ impl ComparisonRunService {
               ct.window_binding_id AS window_binding_id,
               wb.iterm_session_id AS iterm_session_id,
               wb.display_name AS display_name,
-              mp.id AS profile_id,
-              mp.name AS profile_name,
-              mp.provider AS provider,
-              mp.execution_mode AS execution_mode,
-              mp.model_name AS model_name,
-              mp.base_url AS base_url,
-              mp.api_key_encrypted AS api_key_locator,
+              COALESCE(cp.id, mp.id) AS profile_id,
+              COALESCE(cp.name, mp.name) AS profile_name,
+              COALESCE(cp.provider_key, mp.provider) AS provider,
+              COALESCE(cp.client_type, mp.execution_mode) AS execution_mode,
+              COALESCE(cp.default_model, mp.model_name) AS model_name,
+              COALESCE(cp.base_url, mp.base_url) AS base_url,
+              COALESCE(cp.api_key_encrypted, mp.api_key_encrypted) AS api_key_locator,
               mp.system_prompt AS system_prompt,
-              mp.extra_params_json AS extra_params_json
+              COALESCE(cp.extra_params_json, mp.extra_params_json) AS extra_params_json
             FROM comparison_targets ct
             JOIN comparison_runs cr ON cr.id = ct.run_id
             JOIN window_bindings wb ON wb.id = ct.window_binding_id
-            JOIN model_profiles mp ON mp.id = wb.profile_id
+            LEFT JOIN custom_providers cp ON cp.id = wb.custom_provider_id
+            LEFT JOIN model_profiles mp ON mp.id = wb.profile_id
             WHERE ct.status IN ('queued', 'running')
               AND cr.status IN ('queued', 'running')
             ORDER BY position ASC, ct.id ASC

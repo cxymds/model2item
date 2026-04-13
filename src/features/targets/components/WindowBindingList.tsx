@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import type {
   CreateWindowBindingInput,
+  CustomProviderResponse,
   ItermSessionResponse,
-  ProfileResponse,
   UpdateWindowBindingInput,
   WindowBindingResponse,
 } from "../../../types/api";
@@ -11,7 +11,7 @@ import { formatDateTime, shortenId } from "../../../lib/formatters";
 type WindowBindingListProps = {
   bindings: WindowBindingResponse[];
   sessions: ItermSessionResponse[];
-  profiles: ProfileResponse[];
+  customProviders: CustomProviderResponse[];
   isPending: boolean;
   isRefreshingSessions: boolean;
   isUpdatingBinding: boolean;
@@ -26,7 +26,7 @@ type WindowBindingListProps = {
 export function WindowBindingList({
   bindings,
   sessions,
-  profiles,
+  customProviders,
   isPending,
   isRefreshingSessions,
   isUpdatingBinding,
@@ -41,6 +41,7 @@ export function WindowBindingList({
     iterm_session_id: "",
     display_name: "",
     profile_id: "",
+    custom_provider_id: "",
   });
   const [editingBindingId, setEditingBindingId] = useState<string | null>(null);
   const [pendingDeleteBindingId, setPendingDeleteBindingId] = useState<string | null>(null);
@@ -48,11 +49,12 @@ export function WindowBindingList({
     iterm_session_id: "",
     display_name: "",
     profile_id: "",
+    custom_provider_id: "",
   });
 
-  const profileMap = useMemo(() => {
-    return new Map(profiles.map((item) => [item.id, item]));
-  }, [profiles]);
+  const providerMap = useMemo(() => {
+    return new Map(customProviders.map((item) => [item.id, item]));
+  }, [customProviders]);
 
   const sessionOptions = useMemo(() => {
     return sessions.map((session) => ({
@@ -71,12 +73,17 @@ export function WindowBindingList({
         className="stack-form"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!form.profile_id || !form.iterm_session_id.trim() || !form.display_name.trim()) return;
-          onCreate(form);
+          if (!form.custom_provider_id || !form.iterm_session_id.trim() || !form.display_name.trim()) return;
+          onCreate({
+            ...form,
+            profile_id: "",
+            custom_provider_id: form.custom_provider_id,
+          });
           setForm({
             iterm_session_id: "",
             display_name: "",
             profile_id: "",
+            custom_provider_id: "",
           });
         }}
       >
@@ -132,24 +139,28 @@ export function WindowBindingList({
         </label>
 
         <label className="field">
-          <span>绑定配置</span>
+          <span>绑定 Provider</span>
           <select
-            value={form.profile_id}
+            value={form.custom_provider_id ?? ""}
             onChange={(event) => {
-              setForm((current) => ({ ...current, profile_id: event.target.value }));
+              setForm((current) => ({
+                ...current,
+                profile_id: "",
+                custom_provider_id: event.target.value,
+              }));
             }}
             required
           >
-            <option value="">请选择配置</option>
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name} ({profile.model_name})
+            <option value="">请选择 Provider</option>
+            {customProviders.map((provider) => (
+              <option key={provider.id} value={provider.id}>
+                {provider.name} ({provider.client_type} / {provider.provider_key} / {provider.default_model})
               </option>
             ))}
           </select>
         </label>
 
-        <button className="primary-btn" disabled={isPending || profiles.length === 0} type="submit">
+        <button className="primary-btn" disabled={isPending || customProviders.length === 0} type="submit">
           {isPending ? "绑定中..." : "创建绑定"}
         </button>
         <button className="ghost-btn" disabled={isRefreshingSessions} onClick={onRefreshSessions} type="button">
@@ -166,7 +177,9 @@ export function WindowBindingList({
         ) : (
           <ul className="card-list">
             {bindings.map((binding) => {
-              const profile = profileMap.get(binding.profile_id);
+              const provider = binding.custom_provider_id
+                ? providerMap.get(binding.custom_provider_id)
+                : undefined;
               const isOnline = onlineSessionIds.has(binding.iterm_session_id);
               const isEditing = editingBindingId === binding.id;
               return (
@@ -198,19 +211,20 @@ export function WindowBindingList({
                         />
                       </label>
                       <label className="field">
-                        <span>绑定配置</span>
+                        <span>绑定 Provider</span>
                         <select
-                          value={editingForm.profile_id}
+                          value={editingForm.custom_provider_id ?? ""}
                           onChange={(event) => {
                             setEditingForm((current) => ({
                               ...current,
-                              profile_id: event.target.value,
+                              profile_id: "",
+                              custom_provider_id: event.target.value,
                             }));
                           }}
                         >
-                          {profiles.map((item) => (
+                          {customProviders.map((item) => (
                             <option key={item.id} value={item.id}>
-                              {item.name} ({item.model_name})
+                              {item.name} ({item.client_type} / {item.provider_key} / {item.default_model})
                             </option>
                           ))}
                         </select>
@@ -220,7 +234,11 @@ export function WindowBindingList({
                           className="primary-btn"
                           disabled={isUpdatingBinding}
                           onClick={() => {
-                            onUpdate(binding.id, editingForm);
+                            onUpdate(binding.id, {
+                              ...editingForm,
+                              profile_id: "",
+                              custom_provider_id: editingForm.custom_provider_id,
+                            });
                             setEditingBindingId(null);
                           }}
                           type="button"
@@ -243,10 +261,10 @@ export function WindowBindingList({
                       <strong>{binding.display_name}</strong>
                       <span>会话：{binding.iterm_session_id}</span>
                       <span>
-                        配置：
-                        {profile
-                          ? `${profile.name} (${profile.model_name})`
-                          : `未知配置 ${shortenId(binding.profile_id)}`}
+                        Provider：
+                        {provider
+                          ? `${provider.client_type} / ${provider.provider_key} / ${provider.default_model}`
+                          : `未知 Provider ${shortenId(binding.custom_provider_id ?? binding.profile_id)}`}
                       </span>
                       <span>启用状态：{binding.enabled === 1 ? "已启用" : "已禁用"}</span>
                       <span>连接状态：{isOnline ? "在线" : "离线"}</span>
@@ -259,7 +277,8 @@ export function WindowBindingList({
                             setEditingForm({
                               display_name: binding.display_name,
                               iterm_session_id: binding.iterm_session_id,
-                              profile_id: binding.profile_id,
+                              profile_id: "",
+                              custom_provider_id: binding.custom_provider_id ?? "",
                             });
                           }}
                           type="button"

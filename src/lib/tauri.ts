@@ -4,10 +4,12 @@ import type {
   ComparisonRunResponse,
   ComparisonSummaryResponse,
   ComparisonTargetResponse,
+  CreateCustomProviderInput,
   CreateComparisonRunInput,
   CreateEvaluationCaseInput,
   CreateProfileInput,
   CreateWindowBindingInput,
+  CustomProviderResponse,
   EvaluationCaseResponse,
   ItermSessionResponse,
   ProfileResponse,
@@ -36,6 +38,14 @@ export function getProfileSecret(id: string) {
 
 export function deleteProfile(id: string) {
   return core.invoke<void>("delete_profile", { id });
+}
+
+export function listCustomProviders() {
+  return core.invoke<CustomProviderResponse[]>("list_custom_providers");
+}
+
+export function createCustomProvider(input: CreateCustomProviderInput) {
+  return core.invoke<CustomProviderResponse>("create_custom_provider", { input });
 }
 
 export function listWindowBindings() {

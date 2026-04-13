@@ -404,6 +404,7 @@ async fn deletes_profile_and_unreferenced_bindings_together(
             iterm_session_id: "session-1".to_string(),
             display_name: "Window A".to_string(),
             profile_id: created.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -446,6 +447,7 @@ async fn rejects_deleting_profile_when_its_binding_is_referenced_by_active_run(
             iterm_session_id: "session-1".to_string(),
             display_name: "Window A".to_string(),
             profile_id: created.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -499,6 +501,7 @@ async fn soft_deletes_profile_when_finished_run_history_still_references_its_bin
             iterm_session_id: "session-history".to_string(),
             display_name: "Window History".to_string(),
             profile_id: created.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 

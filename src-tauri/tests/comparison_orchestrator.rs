@@ -3,6 +3,7 @@ mod support;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -24,6 +25,8 @@ use iterm_mcp_tools_lib::{
         window_binding_service::WindowBindingService,
     },
 };
+use sqlx::SqlitePool;
+use tokio::{sync::Barrier, time::timeout};
 
 #[derive(Clone, Default)]
 struct FakeAdapter {
@@ -121,7 +124,7 @@ struct DelayedOutputAdapter {
 }
 
 #[derive(Clone, Default)]
-struct ClosingSessionAdapter {
+struct NoOutputAdapter {
     sent_texts: Arc<Mutex<Vec<(String, String)>>>,
     screen_reads: Arc<Mutex<HashMap<String, usize>>>,
 }
@@ -136,6 +139,21 @@ struct OpenaiOnlyAdapter {
 struct EarlyFailureScreenAdapter {
     sent_texts: Arc<Mutex<Vec<(String, String)>>>,
     screen_reads: Arc<Mutex<HashMap<String, usize>>>,
+}
+
+#[derive(Clone)]
+struct ConcurrentBroadcastAdapter {
+    sent_texts: Arc<Mutex<Vec<(String, String)>>>,
+    barrier: Arc<Barrier>,
+}
+
+impl Default for ConcurrentBroadcastAdapter {
+    fn default() -> Self {
+        Self {
+            sent_texts: Arc::new(Mutex::new(Vec::new())),
+            barrier: Arc::new(Barrier::new(2)),
+        }
+    }
 }
 
 #[async_trait]
@@ -224,28 +242,16 @@ impl ItermMcpAdapter for EarlyFailureScreenAdapter {
 }
 
 #[async_trait]
-impl ItermMcpAdapter for ClosingSessionAdapter {
+impl ItermMcpAdapter for NoOutputAdapter {
     async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
-        let reads = self
-            .screen_reads
-            .lock()
-            .expect("screen_reads mutex")
-            .get("session-closing")
-            .copied()
-            .unwrap_or_default();
-
-        if reads >= 10 {
-            Ok(vec![])
-        } else {
-            Ok(vec![ItermSessionInfo {
-                session_id: "session-closing".to_string(),
-                window_id: "window-closing".to_string(),
-                window_title: "Window Closing".to_string(),
-                tab_id: "tab-closing".to_string(),
-                tab_title: "Tab Closing".to_string(),
-                session_title: "Pane Closing".to_string(),
-            }])
-        }
+        Ok(vec![ItermSessionInfo {
+            session_id: "session-no-output".to_string(),
+            window_id: "window-no-output".to_string(),
+            window_title: "Window No Output".to_string(),
+            tab_id: "tab-no-output".to_string(),
+            tab_title: "Tab No Output".to_string(),
+            session_title: "Pane No Output".to_string(),
+        }])
     }
 
     async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String> {
@@ -260,6 +266,58 @@ impl ItermMcpAdapter for ClosingSessionAdapter {
         let mut screen_reads = self.screen_reads.lock().expect("screen_reads mutex");
         let current = screen_reads.entry(session_id.to_string()).or_insert(0);
         *current += 1;
+        Ok(String::new())
+    }
+
+    async fn execute_prompt(
+        &self,
+        request: ItermExecutionRequest,
+    ) -> Result<ItermExecutionResult, String> {
+        Ok(ItermExecutionResult {
+            output_text: format!(
+                "session={} provider={} model={}",
+                request.session_id, request.provider, request.model_name
+            ),
+        })
+    }
+}
+
+#[async_trait]
+impl ItermMcpAdapter for ConcurrentBroadcastAdapter {
+    async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
+        Ok(vec![
+            ItermSessionInfo {
+                session_id: "session-one".to_string(),
+                window_id: "window-one".to_string(),
+                window_title: "Window One".to_string(),
+                tab_id: "tab-one".to_string(),
+                tab_title: "Tab One".to_string(),
+                session_title: "Pane One".to_string(),
+            },
+            ItermSessionInfo {
+                session_id: "session-two".to_string(),
+                window_id: "window-two".to_string(),
+                window_title: "Window Two".to_string(),
+                tab_id: "tab-two".to_string(),
+                tab_title: "Tab Two".to_string(),
+                session_title: "Pane Two".to_string(),
+            },
+        ])
+    }
+
+    async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String> {
+        if text.contains("Continue with parser edge cases") {
+            self.barrier.wait().await;
+        }
+
+        self.sent_texts
+            .lock()
+            .expect("sent_texts mutex")
+            .push((session_id.to_string(), text.to_string()));
+        Ok(())
+    }
+
+    async fn get_screen_text(&self, _session_id: &str) -> Result<String, String> {
         Ok(String::new())
     }
 
@@ -354,6 +412,37 @@ impl ItermMcpAdapter for DelayedOutputAdapter {
     }
 }
 
+async fn insert_custom_provider(
+    pool: &SqlitePool,
+    id: &str,
+    name: &str,
+    provider_key: &str,
+    client_type: &str,
+    base_url: &str,
+    api_key_locator: &str,
+    default_model: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO custom_providers
+          (id, name, provider_key, client_type, base_url, api_key_encrypted, default_model, enabled, extra_params_json, created_at, updated_at)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, 1, '{}', '2026-04-13T00:00:00Z', '2026-04-13T00:00:00Z')
+        "#,
+    )
+    .bind(id)
+    .bind(name)
+    .bind(provider_key)
+    .bind(client_type)
+    .bind(base_url)
+    .bind(api_key_locator)
+    .bind(default_model)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
@@ -404,6 +493,7 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
             iterm_session_id: "session-ok".to_string(),
             display_name: "Window A".to_string(),
             profile_id: success_profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
     let fail_binding = binding_service
@@ -411,6 +501,7 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
             iterm_session_id: "session-fail".to_string(),
             display_name: "Window B".to_string(),
             profile_id: fail_profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -532,6 +623,7 @@ async fn broadcasts_follow_up_input_into_running_target_sessions(
             iterm_session_id: "session-ok".to_string(),
             display_name: "Window A".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -567,6 +659,90 @@ async fn broadcasts_follow_up_input_into_running_target_sessions(
     assert!(combined_messages.contains("Assistant initial result"));
     assert!(combined_messages.contains("Assistant follow-up result"));
     assert!(!combined_messages.contains("Starting interactive Claude session"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn cli_run_stays_running_when_no_new_output_arrives(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = NoOutputAdapter::default();
+    let orchestrator = ComparisonOrchestrator::with_dependencies(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude No Output".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "No output case".to_string(),
+            prompt: "Keep waiting for the model".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-no-output".to_string(),
+            display_name: "Window No Output".to_string(),
+            profile_id: profile.id.clone(),
+            custom_provider_id: None,
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "No output run".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.execute_run(&run.id).await?;
+
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "running");
+    assert!(updated_run.finished_at.is_none());
+
+    let targets = run_service.list_comparison_targets(&run.id).await?;
+    let target = targets
+        .iter()
+        .find(|target| target.window_binding_id == binding.id)
+        .expect("target should exist");
+    assert_eq!(target.status, "running");
+    assert_eq!(target.success_status.as_deref(), Some("streaming"));
+    assert!(target.error_category.is_none());
+    assert!(target.error_detail.is_none());
+    assert!(target.first_response_at.is_none());
+    assert_eq!(target.response_chars, 0);
+    assert_eq!(target.response_lines, 0);
+
+    let sent_texts = adapter.sent_texts.lock().expect("sent_texts mutex");
+    assert!(sent_texts.iter().any(|(session_id, text)| {
+        session_id == "session-no-output" && text.contains("Starting interactive Claude session")
+    }));
+    assert!(sent_texts.iter().any(|(session_id, text)| {
+        session_id == "session-no-output" && text.contains("Keep waiting for the model")
+    }));
 
     Ok(())
 }
@@ -610,6 +786,7 @@ async fn rejects_run_when_target_session_is_offline() -> Result<(), Box<dyn std:
             iterm_session_id: "session-offline".to_string(),
             display_name: "Window Offline".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -683,6 +860,7 @@ async fn openai_chat_run_does_not_require_online_iterm_session(
             iterm_session_id: "session-offline".to_string(),
             display_name: "Window Offline".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -730,6 +908,97 @@ async fn openai_chat_run_does_not_require_online_iterm_session(
 }
 
 #[tokio::test]
+async fn execute_run_prefers_custom_provider_over_profile_fields(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = FakeAdapter::default();
+    let openai_executor = Arc::new(FakeOpenaiExecutor::default());
+    let orchestrator = ComparisonOrchestrator::with_dependencies_and_openai_executor(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+        openai_executor.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Legacy Profile".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://anthropic.example.com".to_string(),
+            api_key: "profile-secret".to_string(),
+        })
+        .await?;
+
+    insert_custom_provider(
+        &pool,
+        "provider-runtime-glm",
+        "GLM OpenAI Chat",
+        "glm",
+        "openai_chat",
+        "https://glm.example.com/v1",
+        "secret://provider/runtime-glm",
+        "glm-5.1",
+    )
+    .await?;
+    secret_store.set_secret("secret://provider/runtime-glm", "provider-secret")?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Provider-first runtime case".to_string(),
+            prompt: "Summarize the parser".to_string(),
+            context_payload: "{\"files\":[\"parser.rs\"]}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-offline".to_string(),
+            display_name: "Window Provider First Runtime".to_string(),
+            profile_id: profile.id.clone(),
+            custom_provider_id: Some("provider-runtime-glm".to_string()),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Provider-first runtime run".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.execute_run(&run.id).await?;
+
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "done");
+
+    let requests = openai_executor.requests.lock().expect("requests mutex");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].execution_mode, "openai_chat");
+    assert_eq!(requests[0].provider, "glm");
+    assert_eq!(requests[0].model_name, "glm-5.1");
+    assert_eq!(requests[0].base_url, "https://glm.example.com/v1");
+    assert_eq!(requests[0].api_key, "provider-secret");
+
+    assert!(adapter
+        .sent_texts
+        .lock()
+        .expect("sent_texts mutex")
+        .is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
@@ -770,6 +1039,7 @@ async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
             iterm_session_id: "session-delayed".to_string(),
             display_name: "Window Delayed".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -814,7 +1084,7 @@ async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
 }
 
 #[tokio::test]
-async fn fails_early_when_terminal_session_closes_before_new_output_arrives(
+async fn cli_broadcast_sends_to_all_running_windows_concurrently(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
     let secret_store = Arc::new(MemorySecretStore::default());
@@ -822,16 +1092,26 @@ async fn fails_early_when_terminal_session_closes_before_new_output_arrives(
     let case_service = EvaluationCaseService::new(pool.clone());
     let binding_service = WindowBindingService::new(pool.clone());
     let run_service = ComparisonRunService::new(pool.clone());
-    let adapter = ClosingSessionAdapter::default();
+    let adapter = ConcurrentBroadcastAdapter::default();
     let orchestrator = ComparisonOrchestrator::with_dependencies(
         pool.clone(),
         secret_store.clone(),
         adapter.clone(),
     );
 
-    let profile = profile_service
+    let profile_one = profile_service
         .create_profile(CreateProfileInput {
-            name: "Claude Closing".to_string(),
+            name: "Claude One".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+    let profile_two = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude Two".to_string(),
             provider: "anthropic".to_string(),
             execution_mode: "claude_cli".to_string(),
             model_name: "claude-3.7".to_string(),
@@ -842,47 +1122,61 @@ async fn fails_early_when_terminal_session_closes_before_new_output_arrives(
 
     let case = case_service
         .create_evaluation_case(CreateEvaluationCaseInput {
-            title: "Closing session case".to_string(),
-            prompt: "Wait for terminal output".to_string(),
+            title: "Concurrent broadcast case".to_string(),
+            prompt: "Initial prompt".to_string(),
             context_payload: "{}".to_string(),
             notes: None,
         })
         .await?;
 
-    let binding = binding_service
+    let binding_one = binding_service
         .create_window_binding(CreateWindowBindingInput {
-            iterm_session_id: "session-closing".to_string(),
-            display_name: "Window Closing".to_string(),
-            profile_id: profile.id.clone(),
+            iterm_session_id: "session-one".to_string(),
+            display_name: "Window One".to_string(),
+            profile_id: profile_one.id.clone(),
+            custom_provider_id: None,
+        })
+        .await?;
+    let binding_two = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-two".to_string(),
+            display_name: "Window Two".to_string(),
+            profile_id: profile_two.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
     let run = run_service
         .create_comparison_run(CreateComparisonRunInput {
             evaluation_case_id: case.id,
-            title: "Closing terminal run".to_string(),
-            target_ids: vec![binding.id.clone()],
+            title: "Concurrent broadcast run".to_string(),
+            target_ids: vec![binding_one.id.clone(), binding_two.id.clone()],
             notes: None,
         })
         .await?;
 
-    orchestrator.execute_run(&run.id).await?;
-
-    let updated_run = run_service.get_comparison_run(&run.id).await?;
-    assert_eq!(updated_run.status, "failed");
-
     let targets = run_service.list_comparison_targets(&run.id).await?;
-    let target = targets
+    run_service.mark_run_started(&run.id).await?;
+    for target in targets {
+        run_service.mark_target_running(&target.id).await?;
+    }
+
+    timeout(
+        Duration::from_secs(1),
+        orchestrator.broadcast_message(&run.id, "Continue with parser edge cases"),
+    )
+    .await
+    .expect("broadcast should not block waiting on serial sends")?;
+
+    let sent_texts = adapter.sent_texts.lock().expect("sent_texts mutex");
+    let sent_sessions = sent_texts
         .iter()
-        .find(|target| target.window_binding_id == binding.id)
-        .expect("target should exist");
-    assert_eq!(target.status, "failed");
-    assert_eq!(target.error_category.as_deref(), Some("adapter_error"));
-    assert!(target
-        .error_detail
-        .as_deref()
-        .unwrap_or_default()
-        .contains("session session-closing closed before new interactive output arrived"));
+        .filter(|(_, text)| text.contains("Continue with parser edge cases"))
+        .map(|(session_id, _)| session_id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(sent_sessions.len(), 2);
+    assert!(sent_sessions.contains(&"session-one"));
+    assert!(sent_sessions.contains(&"session-two"));
 
     Ok(())
 }
@@ -929,6 +1223,7 @@ async fn surfaces_profile_and_target_when_secret_is_missing_at_startup(
             iterm_session_id: "session-ok".to_string(),
             display_name: "Window Missing Secret".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -997,6 +1292,7 @@ async fn openai_chat_targets_complete_without_terminal_incremental_capture(
             iterm_session_id: "session-openai".to_string(),
             display_name: "Window OpenAI".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -1045,7 +1341,7 @@ async fn openai_chat_targets_complete_without_terminal_incremental_capture(
 }
 
 #[tokio::test]
-async fn cli_target_failure_includes_early_screen_output_in_error_detail(
+async fn cli_target_keeps_running_when_screen_contains_early_error_text(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
     let secret_store = Arc::new(MemorySecretStore::default());
@@ -1085,6 +1381,7 @@ async fn cli_target_failure_includes_early_screen_output_in_error_detail(
             iterm_session_id: "session-early-fail".to_string(),
             display_name: "Window Early Fail".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -1099,20 +1396,18 @@ async fn cli_target_failure_includes_early_screen_output_in_error_detail(
 
     orchestrator.execute_run(&run.id).await?;
 
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "running");
+
     let targets = run_service.list_comparison_targets(&run.id).await?;
     let target = targets
         .iter()
         .find(|target| target.window_binding_id == binding.id)
-        .expect("failed target should exist");
-    assert_eq!(target.status, "failed");
-    assert_eq!(target.error_category.as_deref(), Some("adapter_error"));
-    assert!(
-        target
-            .error_detail
-            .as_deref()
-            .unwrap_or_default()
-            .contains("missing auth token for upstream provider")
-    );
+        .expect("target should exist");
+    assert_eq!(target.status, "running");
+    assert_eq!(target.success_status.as_deref(), Some("streaming"));
+    assert!(target.error_category.is_none());
+    assert!(target.error_detail.is_none());
 
     Ok(())
 }
@@ -1165,6 +1460,7 @@ async fn startup_validation_skips_claude_launch_command_for_openai_chat(
             iterm_session_id: "session-openai".to_string(),
             display_name: "Window OpenAI".to_string(),
             profile_id: profile.id,
+            custom_provider_id: None,
         })
         .await?;
 
@@ -1229,6 +1525,7 @@ async fn broadcasts_follow_up_for_openai_chat_without_terminal_io(
             iterm_session_id: "session-openai".to_string(),
             display_name: "Window OpenAI".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 

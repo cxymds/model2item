@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::task::JoinSet;
 
 use crate::{
     error::AppError,
@@ -123,45 +124,36 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
         current_screen[prefix_bytes..].trim().to_string()
     }
 
-    async fn capture_incremental_interactive_output(
+    async fn try_record_cli_preview(
         &self,
+        target_id: &str,
         session_id: &str,
         baseline_screen: &str,
-    ) -> Result<(String, String), AppError> {
-        const MAX_SCREEN_READ_ATTEMPTS: usize = 20;
-        const SCREEN_READ_INTERVAL_MS: u64 = 500;
-        const ONLINE_CHECK_INTERVAL_ATTEMPTS: usize = 10;
+    ) -> Result<(), AppError> {
+        const PREVIEW_MAX_ATTEMPTS: usize = 3;
+        const PREVIEW_INTERVAL_MS: u64 = 250;
 
-        for attempt in 0..MAX_SCREEN_READ_ATTEMPTS {
-            let screen_text = self.read_screen_text(session_id).await?;
-            let delta = Self::extract_incremental_output(baseline_screen, &screen_text);
+        let mut previous_screen = baseline_screen.to_string();
+        for attempt in 0..PREVIEW_MAX_ATTEMPTS {
+            let screen_text = match self.read_screen_text(session_id).await {
+                Ok(screen_text) => screen_text,
+                Err(_) => return Ok(()),
+            };
+            let delta = Self::extract_incremental_output(&previous_screen, &screen_text);
             if !delta.is_empty() {
-                return Ok((screen_text, delta));
+                self.run_service
+                    .record_target_interactive_output(target_id, &delta)
+                    .await?;
+                return Ok(());
             }
 
-            if (attempt + 1) % ONLINE_CHECK_INTERVAL_ATTEMPTS == 0 {
-                let session_is_online = self
-                    .adapter
-                    .list_sessions()
-                    .await
-                    .map_err(classify_adapter_error)?
-                    .into_iter()
-                    .any(|session| session.session_id == session_id);
-                if !session_is_online {
-                    return Err(AppError::Adapter(format!(
-                        "session {session_id} closed before new interactive output arrived"
-                    )));
-                }
-            }
-
-            if attempt + 1 < MAX_SCREEN_READ_ATTEMPTS {
-                tokio::time::sleep(Duration::from_millis(SCREEN_READ_INTERVAL_MS)).await;
+            previous_screen = screen_text;
+            if attempt + 1 < PREVIEW_MAX_ATTEMPTS {
+                tokio::time::sleep(Duration::from_millis(PREVIEW_INTERVAL_MS)).await;
             }
         }
 
-        Err(AppError::Adapter(format!(
-            "timed out waiting for new interactive output from session {session_id}"
-        )))
+        Ok(())
     }
 
     async fn enrich_cli_error_with_screen(
@@ -268,13 +260,23 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
 
         self.run_service.mark_run_started(run_id).await?;
 
-        let mut failed_count = 0usize;
+        let mut join_set = JoinSet::new();
         for target in targets {
-            if self
-                .execute_target(&run.prompt_snapshot, &run.context_snapshot, &target)
-                .await
-                .is_err()
-            {
+            let orchestrator = self.clone();
+            let run_prompt = run.prompt_snapshot.clone();
+            let context_snapshot = run.context_snapshot.clone();
+            join_set.spawn(async move {
+                orchestrator
+                    .execute_target(&run_prompt, &context_snapshot, &target)
+                    .await
+            });
+        }
+
+        let mut failed_count = 0usize;
+        while let Some(result) = join_set.join_next().await {
+            let result = result
+                .map_err(|error| AppError::Adapter(format!("target execution task failed: {error}")))?;
+            if result.is_err() {
                 failed_count += 1;
             }
         }
@@ -306,70 +308,120 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             )));
         }
 
+        let mut join_set = JoinSet::new();
         for target in targets {
-            self.run_service
-                .store_target_message(&target.target_id, "user", prompt, "follow_up")
-                .await?;
-            if target.execution_mode == "openai_chat" {
-                let api_key = self
-                    .secret_store
-                    .get_secret(&target.api_key_locator)
-                    .map_err(|error| {
-                        Self::map_secret_lookup_error(
-                            &target.display_name,
-                            &target.profile_name,
-                            error,
-                        )
-                    })?;
-                let request = ItermExecutionRequest {
-                    request_id: target.target_id.clone(),
-                    session_id: target.iterm_session_id.clone(),
-                    prompt: prompt.to_string(),
-                    execution_mode: target.execution_mode.clone(),
-                    provider: target.provider.clone(),
-                    model_name: target.model_name.clone(),
-                    base_url: target.base_url.clone(),
-                    api_key,
-                    system_prompt: target.system_prompt.clone(),
-                    extra_params_json: target.extra_params_json.clone(),
-                };
+            let orchestrator = self.clone();
+            let prompt = prompt.to_string();
+            join_set.spawn(async move { orchestrator.broadcast_to_target(target, prompt).await });
+        }
 
-                match self.openai_executor.execute_chat_completion(&request).await {
-                    Ok(output_text) => {
-                        self.run_service
-                            .record_target_interactive_output(&target.target_id, &output_text)
-                            .await?;
-                    }
-                    Err(error) => {
-                        self.run_service
-                            .mark_target_failed(&target.target_id, "execution_error", &error)
-                            .await?;
-                        return Err(AppError::Adapter(error));
+        let mut first_error = None;
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    if first_error.is_none() {
+                        first_error = Some(error);
                     }
                 }
-            } else {
-                let baseline_screen = self.read_screen_text(&target.iterm_session_id).await?;
-                self.adapter
-                    .send_text(&target.iterm_session_id, &format!("{prompt}\n"))
-                    .await
-                    .map_err(classify_adapter_error)?;
-                tokio::time::sleep(Duration::from_millis(250)).await;
-                let baseline_after_prompt = self.read_screen_text(&target.iterm_session_id).await?;
-                let baseline = if baseline_after_prompt.trim().is_empty() {
-                    baseline_screen.as_str()
-                } else {
-                    baseline_after_prompt.as_str()
-                };
-                let (_, delta) = self
-                    .capture_incremental_interactive_output(&target.iterm_session_id, baseline)
-                    .await?;
-                self.run_service
-                    .record_target_interactive_output(&target.target_id, &delta)
-                    .await?;
+                Err(error) => {
+                    if first_error.is_none() {
+                        first_error = Some(AppError::Adapter(format!(
+                            "target broadcast task failed: {error}"
+                        )));
+                    }
+                }
             }
         }
 
-        Ok(())
+        if let Some(error) = first_error {
+            Err(error)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn broadcast_to_target(
+        &self,
+        target: ComparisonTargetExecutionRecord,
+        prompt: String,
+    ) -> Result<(), AppError> {
+        self.run_service
+            .store_target_message(&target.target_id, "user", &prompt, "follow_up")
+            .await?;
+
+        if target.execution_mode == "openai_chat" {
+            let api_key = self
+                .secret_store
+                .get_secret(&target.api_key_locator)
+                .map_err(|error| {
+                    Self::map_secret_lookup_error(&target.display_name, &target.profile_name, error)
+                })?;
+            let request = ItermExecutionRequest {
+                request_id: target.target_id.clone(),
+                session_id: target.iterm_session_id.clone(),
+                prompt,
+                execution_mode: target.execution_mode.clone(),
+                provider: target.provider.clone(),
+                model_name: target.model_name.clone(),
+                base_url: target.base_url.clone(),
+                api_key,
+                system_prompt: target.system_prompt.clone(),
+                extra_params_json: target.extra_params_json.clone(),
+            };
+
+            match self.openai_executor.execute_chat_completion(&request).await {
+                Ok(output_text) => {
+                    self.run_service
+                        .record_target_interactive_output(&target.target_id, &output_text)
+                        .await?;
+                    Ok(())
+                }
+                Err(error) => {
+                    self.run_service
+                        .mark_target_failed(&target.target_id, "execution_error", &error)
+                        .await?;
+                    Err(AppError::Adapter(error))
+                }
+            }
+        } else {
+            let baseline_screen = self
+                .read_screen_text(&target.iterm_session_id)
+                .await
+                .unwrap_or_default();
+            match self
+                .adapter
+                .send_text(&target.iterm_session_id, &format!("{prompt}\n"))
+                .await
+            {
+                Ok(()) => {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    let baseline_after_prompt = self
+                        .read_screen_text(&target.iterm_session_id)
+                        .await
+                        .unwrap_or_else(|_| baseline_screen.clone());
+                    let baseline = if baseline_after_prompt.trim().is_empty() {
+                        baseline_screen
+                    } else {
+                        baseline_after_prompt
+                    };
+                    self.try_record_cli_preview(
+                        &target.target_id,
+                        &target.iterm_session_id,
+                        &baseline,
+                    )
+                    .await?;
+                    Ok(())
+                }
+                Err(error) => {
+                    let error = classify_adapter_error(error);
+                    self.run_service
+                        .mark_target_failed(&target.target_id, "adapter_error", &error.to_string())
+                        .await?;
+                    Err(error)
+                }
+            }
+        }
     }
 
     async fn ensure_targets_online(
@@ -444,12 +496,24 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             extra_params_json: target.extra_params_json.clone(),
         };
 
-        let result = if target.execution_mode == "openai_chat" {
-            self.openai_executor.execute_chat_completion(&request).await
+        if target.execution_mode == "openai_chat" {
+            match self.openai_executor.execute_chat_completion(&request).await {
+                Ok(output_text) => {
+                    self.run_service
+                        .mark_target_completed(&target.target_id, &output_text)
+                        .await
+                }
+                Err(error) => {
+                    self.run_service
+                        .mark_target_failed(&target.target_id, "execution_error", &error)
+                        .await?;
+                    Err(AppError::Adapter(error))
+                }
+            }
         } else {
             let baseline_before_launch = String::new();
             let launch_command = build_claude_cli_launch_command(&request);
-            match launch_command {
+            let result = match launch_command {
                 Ok(command) => {
                     if let Err(error) = self
                         .adapter
@@ -465,81 +529,46 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                             .await,
                         )
                     } else {
-                        tokio::time::sleep(Duration::from_millis(1200)).await;
-                        if let Err(error) = self
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                        match self
                             .adapter
                             .send_text(&target.iterm_session_id, &format!("{request_prompt}\n"))
                             .await
                         {
-                            Err(
+                            Ok(()) => {
+                                tokio::time::sleep(Duration::from_millis(250)).await;
+                                let baseline_after_prompt = self
+                                    .read_screen_text(&target.iterm_session_id)
+                                    .await
+                                    .unwrap_or_default();
+                                self.try_record_cli_preview(
+                                    &target.target_id,
+                                    &target.iterm_session_id,
+                                    &baseline_after_prompt,
+                                )
+                                .await?;
+                                Ok(())
+                            }
+                            Err(error) => Err(
                                 self.enrich_cli_error_with_screen(
                                     &target.iterm_session_id,
                                     &baseline_before_launch,
                                     error,
                                 )
                                 .await,
-                            )
-                        } else {
-                            tokio::time::sleep(Duration::from_millis(250)).await;
-                            match self.read_screen_text(&target.iterm_session_id).await {
-                                Ok(baseline_after_prompt) => {
-                                    match self
-                                        .capture_incremental_interactive_output(
-                                            &target.iterm_session_id,
-                                            &baseline_after_prompt,
-                                        )
-                                        .await
-                                    {
-                                        Ok((_, delta)) => Ok(delta),
-                                        Err(error) => Err(
-                                            self.enrich_cli_error_with_screen(
-                                                &target.iterm_session_id,
-                                                &baseline_before_launch,
-                                                error.to_string(),
-                                            )
-                                            .await,
-                                        ),
-                                    }
-                                }
-                                Err(error) => Err(
-                                    self.enrich_cli_error_with_screen(
-                                        &target.iterm_session_id,
-                                        &baseline_before_launch,
-                                        error.to_string(),
-                                    )
-                                    .await,
-                                ),
-                            }
+                            ),
                         }
                     }
                 }
                 Err(error) => Err(error),
-            }
-        };
+            };
 
-        match (target.execution_mode.as_str(), result) {
-            ("openai_chat", Ok(output_text)) => {
-                self.run_service
-                    .mark_target_completed(&target.target_id, &output_text)
-                    .await
-            }
-            (_, Ok(output_text)) => {
-                self.run_service
-                    .record_target_interactive_output(&target.target_id, &output_text)
-                    .await
-            }
-            (_, Err(error)) => {
-                let error_category = if target.execution_mode == "openai_chat" {
-                    "execution_error"
-                } else {
-                    "adapter_error"
-                };
-                self.run_service
-                    .mark_target_failed(&target.target_id, error_category, &error)
-                    .await?;
-                if target.execution_mode == "openai_chat" {
-                    Err(AppError::Adapter(error))
-                } else {
+            match result {
+                Ok(()) => Ok(()),
+                Err(error) => {
+                    self.run_service
+                        .mark_target_failed(&target.target_id, "adapter_error", &error)
+                        .await?;
                     Err(classify_adapter_error(error))
                 }
             }

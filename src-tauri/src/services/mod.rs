@@ -1,6 +1,7 @@
 pub mod analysis_service;
 pub mod comparison_orchestrator;
 pub mod comparison_run_service;
+pub mod custom_provider_service;
 pub mod evaluation_case_service;
 pub mod iterm_mcp_adapter;
 pub mod iterm_session_service;

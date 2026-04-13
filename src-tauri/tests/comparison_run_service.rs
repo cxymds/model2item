@@ -49,6 +49,7 @@ async fn creates_comparison_run_and_target_snapshots() -> Result<(), Box<dyn std
             iterm_session_id: "session-1".to_string(),
             display_name: "Window A".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -180,6 +181,7 @@ async fn rejects_creating_a_second_active_comparison_run() -> Result<(), Box<dyn
             iterm_session_id: "session-1".to_string(),
             display_name: "Window A".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -242,6 +244,7 @@ async fn deduplicates_duplicate_target_ids_and_keeps_input_order(
             iterm_session_id: "session-a".to_string(),
             display_name: "Window A".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -250,6 +253,7 @@ async fn deduplicates_duplicate_target_ids_and_keeps_input_order(
             iterm_session_id: "session-b".to_string(),
             display_name: "Window B".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -315,6 +319,7 @@ async fn lists_recent_comparison_runs_in_descending_order_with_limit(
             iterm_session_id: "session-1".to_string(),
             display_name: "Window A".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -378,6 +383,7 @@ async fn reconciles_closed_sessions_for_queued_and_running_targets_in_one_active
             iterm_session_id: "session-queued-closed".to_string(),
             display_name: "Window Queued".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 
@@ -386,6 +392,7 @@ async fn reconciles_closed_sessions_for_queued_and_running_targets_in_one_active
             iterm_session_id: "session-running-closed".to_string(),
             display_name: "Window Running".to_string(),
             profile_id: profile.id.clone(),
+            custom_provider_id: None,
         })
         .await?;
 

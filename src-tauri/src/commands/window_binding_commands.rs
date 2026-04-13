@@ -11,7 +11,9 @@ use crate::{
         iterm_session_service::ItermSessionService,
         secret_store::SystemSecretStore,
         window_binding_service::WindowBindingService,
-        window_binding_sync_service::{create_window_binding_and_sync, WindowBindingSyncService},
+        window_binding_sync_service::{
+            create_window_binding_and_sync, update_window_binding_and_sync,
+        },
     },
 };
 
@@ -49,15 +51,14 @@ pub async fn update_window_binding(
     id: String,
     input: UpdateWindowBindingInput,
 ) -> Result<WindowBindingResponse, String> {
-    let service = WindowBindingService::new(state.pool.clone());
-    let binding = service
-        .update_window_binding(&id, input)
-        .await
-        .map_err(|error| error.to_string())?;
-    let sync_service = WindowBindingSyncService::new(state.pool.clone());
-    sync_service
-        .apply_binding(&binding.id)
-        .await
+    let binding = update_window_binding_and_sync(
+        state.pool.clone(),
+        PythonItermMcpAdapter::default(),
+        std::sync::Arc::new(SystemSecretStore),
+        &id,
+        input,
+    )
+    .await
         .map_err(|error| error.to_string())?;
     Ok(binding.into())
 }
