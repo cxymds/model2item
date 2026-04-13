@@ -18,6 +18,7 @@ use crate::{
 #[derive(Debug, FromRow)]
 struct BindingSyncRecord {
     iterm_session_id: String,
+    display_name: String,
     profile_name: String,
     provider: String,
     execution_mode: String,
@@ -44,6 +45,30 @@ impl WindowBindingSyncService<PythonItermMcpAdapter> {
 }
 
 impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
+    fn map_secret_lookup_error(
+        target_display_name: &str,
+        profile_name: &str,
+        error: AppError,
+    ) -> AppError {
+        match error {
+            AppError::SecretStore(message)
+                if message.contains("No matching entry found in secure storage") =>
+            {
+                AppError::InvalidInput(format!(
+                    "cannot apply binding for target `{target_display_name}` because profile `{profile_name}` is missing its saved API key in secure storage. Open that profile and re-save the API key, then try again."
+                ))
+            }
+            AppError::MissingDependency(message)
+                if message.contains("secret not found for locator") =>
+            {
+                AppError::InvalidInput(format!(
+                    "cannot apply binding for target `{target_display_name}` because profile `{profile_name}` is missing its saved API key in secure storage. Open that profile and re-save the API key, then try again."
+                ))
+            }
+            other => other,
+        }
+    }
+
     pub fn with_dependencies(
         pool: SqlitePool,
         adapter: A,
@@ -61,6 +86,7 @@ impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
             r#"
             SELECT
               wb.iterm_session_id AS iterm_session_id,
+              wb.display_name AS display_name,
               mp.name AS profile_name,
               mp.provider AS provider,
               mp.execution_mode AS execution_mode,
@@ -80,7 +106,12 @@ impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
             AppError::MissingDependency(format!("window binding {binding_id} not found"))
         })?;
 
-        let api_key = self.secret_store.get_secret(&record.api_key_locator)?;
+        let api_key = self
+            .secret_store
+            .get_secret(&record.api_key_locator)
+            .map_err(|error| {
+                Self::map_secret_lookup_error(&record.display_name, &record.profile_name, error)
+            })?;
         let command = build_binding_sync_command(
             &record.profile_name,
             &record.provider,

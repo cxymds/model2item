@@ -72,6 +72,7 @@ pub fn run() {
             commands::profile_commands::create_profile,
             commands::profile_commands::list_profiles,
             commands::profile_commands::update_profile,
+            commands::profile_commands::get_profile_secret,
             commands::profile_commands::delete_profile,
             commands::window_binding_commands::create_window_binding,
             commands::window_binding_commands::list_window_bindings,

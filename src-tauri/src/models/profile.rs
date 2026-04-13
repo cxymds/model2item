@@ -34,6 +34,11 @@ pub struct ProfileResponse {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileSecretResponse {
+    pub api_key: Option<String>,
+}
+
 impl From<ModelProfileRecord> for ProfileResponse {
     fn from(value: ModelProfileRecord) -> Self {
         Self {

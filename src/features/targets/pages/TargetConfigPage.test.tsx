@@ -3,7 +3,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import { TargetConfigPage } from "./TargetConfigPage";
 
-const { createProfile, updateWindowBinding, deleteWindowBinding, updateProfile, deleteProfile } =
+const {
+  createProfile,
+  updateWindowBinding,
+  deleteWindowBinding,
+  updateProfile,
+  deleteProfile,
+  getProfileSecret,
+} =
   vi.hoisted(() => {
   return {
     createProfile: vi.fn().mockResolvedValue({
@@ -47,6 +54,9 @@ const { createProfile, updateWindowBinding, deleteWindowBinding, updateProfile, 
       updated_at: "2026-01-02T00:00:00Z",
     }),
     deleteProfile: vi.fn().mockResolvedValue(undefined),
+    getProfileSecret: vi.fn().mockResolvedValue({
+      api_key: "saved-secret",
+    }),
   };
   });
 
@@ -54,6 +64,7 @@ vi.mock("../../../lib/tauri", () => {
   return {
     createProfile,
     updateProfile,
+    getProfileSecret,
     deleteProfile,
     createWindowBinding: vi.fn(),
     updateWindowBinding,
@@ -181,6 +192,8 @@ describe("TargetConfigPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "编辑配置 GPT-5.4 baseline" }));
+    expect(getProfileSecret).toHaveBeenCalledWith("profile-1");
+    expect(await screen.findByDisplayValue("saved-secret")).toBeInTheDocument();
     fireEvent.change(screen.getByDisplayValue("GPT-5.4 baseline"), {
       target: { value: "GPT-5.4 updated" },
     });
@@ -190,7 +203,7 @@ describe("TargetConfigPage", () => {
     fireEvent.change(screen.getByDisplayValue("https://api.example.com/v1"), {
       target: { value: "https://api.example.com/v2" },
     });
-    fireEvent.change(screen.getByPlaceholderText("留空则保持当前密钥"), {
+    fireEvent.change(screen.getByDisplayValue("saved-secret"), {
       target: { value: "new-secret" },
     });
     fireEvent.change((await screen.findAllByLabelText("执行模式"))[1], {
@@ -208,6 +221,30 @@ describe("TargetConfigPage", () => {
         api_key: "new-secret",
       });
     });
+  });
+
+  it("shows and hides the saved api key while editing", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑配置 GPT-5.4 baseline" }));
+    const apiKeyInput = (await screen.findByDisplayValue("saved-secret")) as HTMLInputElement;
+    expect(apiKeyInput.type).toBe("password");
+
+    fireEvent.click(screen.getByRole("button", { name: "显示 API key" }));
+    expect(apiKeyInput.type).toBe("text");
+
+    fireEvent.click(screen.getByRole("button", { name: "隐藏 API key" }));
+    expect(apiKeyInput.type).toBe("password");
+  });
+
+  it("requires re-entering the api key when the saved one is missing", async () => {
+    getProfileSecret.mockResolvedValueOnce({ api_key: null });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "编辑配置 GPT-5.4 baseline" }));
+
+    expect(await screen.findByText("当前未找到已保存的 API key，请重新输入后保存。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "保存配置" })).toBeDisabled();
   });
 
   it("creates a profile with selected execution_mode in payload", async () => {
@@ -250,6 +287,7 @@ describe("TargetConfigPage", () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "编辑配置 GPT-5.4 baseline" }));
+    await screen.findByDisplayValue("saved-secret");
     fireEvent.change(screen.getByDisplayValue("gpt-5.4"), {
       target: { value: "gpt-5.4-turbo" },
     });
@@ -262,7 +300,7 @@ describe("TargetConfigPage", () => {
         execution_mode: "openai_chat",
         model_name: "gpt-5.4-turbo",
         base_url: "https://api.example.com/v1",
-        api_key: "",
+        api_key: "saved-secret",
       });
     });
   });

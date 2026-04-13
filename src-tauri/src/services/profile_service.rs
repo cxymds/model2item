@@ -17,6 +17,30 @@ pub struct ProfileService {
 }
 
 impl ProfileService {
+    fn persist_secret(&self, locator: &str, secret: &str) -> Result<(), AppError> {
+        self.secret_store.set_secret(locator, secret)?;
+        let stored_secret = self.secret_store.get_secret(locator)?;
+        if stored_secret == secret {
+            Ok(())
+        } else {
+            Err(AppError::SecretStore(
+                "saved API key could not be verified in secure storage".to_string(),
+            ))
+        }
+    }
+
+    fn is_missing_secret_error(error: &AppError) -> bool {
+        match error {
+            AppError::SecretStore(message) => {
+                message.contains("No matching entry found in secure storage")
+            }
+            AppError::MissingDependency(message) => {
+                message.contains("secret not found for locator")
+            }
+            _ => false,
+        }
+    }
+
     fn normalize_execution_mode(execution_mode: &str) -> &'static str {
         if execution_mode == "openai_chat" {
             "openai_chat"
@@ -50,8 +74,7 @@ impl ProfileService {
         let api_key_locator = profile_secret_locator(&id);
         let execution_mode = Self::normalize_execution_mode(&input.execution_mode);
         let provider = Self::provider_for_execution_mode(execution_mode);
-        self.secret_store
-            .set_secret(&api_key_locator, &input.api_key)?;
+        self.persist_secret(&api_key_locator, &input.api_key)?;
 
         sqlx::query(
             r#"
@@ -104,8 +127,7 @@ impl ProfileService {
         let execution_mode = Self::normalize_execution_mode(&input.execution_mode);
         let provider = Self::provider_for_execution_mode(execution_mode);
         if !input.api_key.trim().is_empty() {
-            self.secret_store
-                .set_secret(&api_key_locator, &input.api_key)?;
+            self.persist_secret(&api_key_locator, &input.api_key)?;
         }
 
         sqlx::query(
@@ -134,6 +156,15 @@ impl ProfileService {
         .await?;
 
         self.get_profile(id).await
+    }
+
+    pub async fn get_profile_api_key(&self, id: &str) -> Result<Option<String>, AppError> {
+        let profile = self.get_profile(id).await?;
+        match self.secret_store.get_secret(&profile.api_key_encrypted) {
+            Ok(secret) => Ok(Some(secret)),
+            Err(error) if Self::is_missing_secret_error(&error) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn delete_profile(&self, id: &str) -> Result<(), AppError> {

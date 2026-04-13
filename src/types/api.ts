@@ -35,6 +35,10 @@ export type ProfileResponse = {
   updated_at: string;
 };
 
+export type ProfileSecretResponse = {
+  api_key: string | null;
+};
+
 export type CreateProfileInput = {
   name: string;
   provider: Provider;

@@ -11,6 +11,7 @@ import type {
   EvaluationCaseResponse,
   ItermSessionResponse,
   ProfileResponse,
+  ProfileSecretResponse,
   UpdateEvaluationCaseInput,
   UpdateProfileInput,
   UpdateWindowBindingInput,
@@ -27,6 +28,10 @@ export function createProfile(input: CreateProfileInput) {
 
 export function updateProfile(id: string, input: UpdateProfileInput) {
   return core.invoke<ProfileResponse>("update_profile", { id, input });
+}
+
+export function getProfileSecret(id: string) {
+  return core.invoke<ProfileSecretResponse>("get_profile_secret", { id });
 }
 
 export function deleteProfile(id: string) {

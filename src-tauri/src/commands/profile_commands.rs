@@ -2,7 +2,9 @@ use tauri::State;
 
 use crate::{
     app_state::AppState,
-    models::profile::{CreateProfileInput, ProfileResponse, UpdateProfileInput},
+    models::profile::{
+        CreateProfileInput, ProfileResponse, ProfileSecretResponse, UpdateProfileInput,
+    },
     services::profile_service::ProfileService,
 };
 
@@ -41,6 +43,19 @@ pub async fn update_profile(
         .await
         .map_err(|error| error.to_string())?;
     Ok(profile.into())
+}
+
+#[tauri::command]
+pub async fn get_profile_secret(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<ProfileSecretResponse, String> {
+    let service = ProfileService::new(state.pool.clone());
+    let api_key = service
+        .get_profile_api_key(&id)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ProfileSecretResponse { api_key })
 }
 
 #[tauri::command]

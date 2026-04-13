@@ -1,6 +1,9 @@
 mod support;
 
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use iterm_mcp_tools_lib::{
     error::AppError,
@@ -10,10 +13,50 @@ use iterm_mcp_tools_lib::{
     },
     services::{
         profile_service::ProfileService,
-        secret_store::{profile_secret_locator, MemorySecretStore},
+        secret_store::{profile_secret_locator, MemorySecretStore, SecretStore},
         window_binding_service::WindowBindingService,
     },
 };
+
+#[derive(Debug, Default)]
+struct WriteOnlySecretStore {
+    secrets: Mutex<HashMap<String, String>>,
+}
+
+impl SecretStore for WriteOnlySecretStore {
+    fn set_secret(&self, locator: &str, secret: &str) -> Result<(), AppError> {
+        self.secrets
+            .lock()
+            .map_err(|_| AppError::SecretStore("write-only secret store lock poisoned".to_string()))?
+            .insert(locator.to_string(), secret.to_string());
+        Ok(())
+    }
+
+    fn get_secret(&self, locator: &str) -> Result<String, AppError> {
+        if self
+            .secrets
+            .lock()
+            .map_err(|_| AppError::SecretStore("write-only secret store lock poisoned".to_string()))?
+            .contains_key(locator)
+        {
+            Err(AppError::SecretStore(
+                "No matching entry found in secure storage".to_string(),
+            ))
+        } else {
+            Err(AppError::MissingDependency(format!(
+                "secret not found for locator {locator}"
+            )))
+        }
+    }
+
+    fn delete_secret(&self, locator: &str) -> Result<(), AppError> {
+        self.secrets
+            .lock()
+            .map_err(|_| AppError::SecretStore("write-only secret store lock poisoned".to_string()))?
+            .remove(locator);
+        Ok(())
+    }
+}
 
 #[tokio::test]
 async fn creates_core_tables() -> Result<(), Box<dyn std::error::Error>> {
@@ -186,6 +229,122 @@ async fn keeps_existing_secret_when_updating_profile_without_new_api_key(
             .as_deref(),
         Some("secret-1")
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn returns_saved_profile_api_key_for_editing() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool.clone(), secret_store);
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+
+    let api_key = service.get_profile_api_key(&created.id).await?;
+    assert_eq!(api_key.as_deref(), Some("secret-1"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn returns_none_when_profile_secret_is_missing() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+
+    secret_store.delete_secret(&profile_secret_locator(&created.id))?;
+
+    let api_key = service.get_profile_api_key(&created.id).await?;
+    assert_eq!(api_key, None);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejects_creating_profile_when_secret_cannot_be_read_back(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let service =
+        ProfileService::with_secret_store(pool, Arc::new(WriteOnlySecretStore::default()));
+
+    let result = service
+        .create_profile(CreateProfileInput {
+            name: "Broken Secure Store".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await;
+
+    assert!(matches!(result, Err(AppError::SecretStore(_))));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejects_updating_profile_when_secret_cannot_be_read_back(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let service =
+        ProfileService::with_secret_store(pool.clone(), Arc::new(WriteOnlySecretStore::default()));
+
+    sqlx::query(
+        r#"
+        INSERT INTO model_profiles
+          (id, name, provider, execution_mode, model_name, base_url, api_key_encrypted, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind("profile-1")
+    .bind("Broken Secure Store")
+    .bind("openai")
+    .bind("openai_chat")
+    .bind("gpt-5.4")
+    .bind("https://api.example.com/v1")
+    .bind(profile_secret_locator("profile-1"))
+    .bind("2026-04-10T00:00:00Z")
+    .bind("2026-04-10T00:00:00Z")
+    .execute(&pool)
+    .await?;
+
+    let result = service
+        .update_profile(
+            "profile-1",
+            UpdateProfileInput {
+                name: "Broken Secure Store Updated".to_string(),
+                provider: "openai".to_string(),
+                execution_mode: "openai_chat".to_string(),
+                model_name: "gpt-5.4-mini".to_string(),
+                base_url: "https://api.example.com/v2".to_string(),
+                api_key: "secret-2".to_string(),
+            },
+        )
+        .await;
+
+    assert!(matches!(result, Err(AppError::SecretStore(_))));
 
     Ok(())
 }

@@ -5,6 +5,7 @@ import {
   createWindowBinding,
   deleteProfile,
   deleteWindowBinding,
+  getProfileSecret,
   listItermSessions,
   listProfiles,
   listWindowBindings,
@@ -31,6 +32,10 @@ function getErrorMessage(error: unknown) {
 export function TargetConfigPage() {
   const queryClient = useQueryClient();
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+  const [editingProfileSecretMissing, setEditingProfileSecretMissing] = useState(false);
+  const [editingProfileSecretVisible, setEditingProfileSecretVisible] = useState(false);
+  const [editingProfileSecretError, setEditingProfileSecretError] = useState<string | null>(null);
+  const [isLoadingEditingProfileSecret, setIsLoadingEditingProfileSecret] = useState(false);
   const [editingProfileForm, setEditingProfileForm] = useState<UpdateProfileInput>({
     name: "",
     provider: "anthropic",
@@ -108,6 +113,44 @@ export function TargetConfigPage() {
       await queryClient.invalidateQueries({ queryKey: ["window-bindings"] });
     },
   });
+
+  async function startEditingProfile(profile: {
+    id: string;
+    name: string;
+    provider: string;
+    execution_mode: string;
+    model_name: string;
+    base_url: string;
+  }) {
+    const executionMode = normalizeExecutionMode(profile.execution_mode);
+    setEditingProfileId(profile.id);
+    setEditingProfileSecretMissing(false);
+    setEditingProfileSecretVisible(false);
+    setEditingProfileSecretError(null);
+    setIsLoadingEditingProfileSecret(true);
+    setEditingProfileForm({
+      name: profile.name,
+      provider: PROVIDER_BY_EXECUTION_MODE[executionMode],
+      execution_mode: executionMode,
+      model_name: profile.model_name,
+      base_url: profile.base_url,
+      api_key: "",
+    });
+
+    try {
+      const secret = await getProfileSecret(profile.id);
+      setEditingProfileForm((current) => ({
+        ...current,
+        api_key: secret.api_key ?? "",
+      }));
+      setEditingProfileSecretMissing(secret.api_key == null);
+    } catch (error) {
+      setEditingProfileSecretError(getErrorMessage(error));
+      setEditingProfileSecretMissing(true);
+    } finally {
+      setIsLoadingEditingProfileSecret(false);
+    }
+  }
 
   return (
     <section className="page stack-block">
@@ -206,23 +249,54 @@ export function TargetConfigPage() {
                         />
                       </label>
                       <label className="field">
-                        <span>新 API key</span>
-                        <input
-                          placeholder="留空则保持当前密钥"
-                          type="password"
-                          value={editingProfileForm.api_key}
-                          onChange={(event) => {
-                            setEditingProfileForm((current) => ({
-                              ...current,
-                              api_key: event.target.value,
-                            }));
-                          }}
-                        />
+                        <span>API key</span>
+                        <div className="stack-inline">
+                          <input
+                            placeholder={
+                              editingProfileSecretMissing
+                                ? "当前未保存 API key，请重新输入"
+                                : "正在加载已保存的 API key..."
+                            }
+                            type={editingProfileSecretVisible ? "text" : "password"}
+                            value={editingProfileForm.api_key}
+                            onChange={(event) => {
+                              setEditingProfileForm((current) => ({
+                                ...current,
+                                api_key: event.target.value,
+                              }));
+                              if (event.target.value.trim()) {
+                                setEditingProfileSecretMissing(false);
+                              }
+                            }}
+                          />
+                          <button
+                            className="ghost-btn"
+                            onClick={() => {
+                              setEditingProfileSecretVisible((current) => !current);
+                            }}
+                            type="button"
+                          >
+                            {editingProfileSecretVisible ? "隐藏 API key" : "显示 API key"}
+                          </button>
+                        </div>
                       </label>
+                      {isLoadingEditingProfileSecret ? (
+                        <p className="muted">正在加载已保存的 API key...</p>
+                      ) : null}
+                      {editingProfileSecretMissing ? (
+                        <p className="error-text">当前未找到已保存的 API key，请重新输入后保存。</p>
+                      ) : null}
+                      {editingProfileSecretError ? (
+                        <p className="error-text">读取当前 API key 失败。{editingProfileSecretError}</p>
+                      ) : null}
                       <div className="stack-inline">
                         <button
                           className="primary-btn"
-                          disabled={updateProfileMutation.isPending}
+                          disabled={
+                            updateProfileMutation.isPending ||
+                            isLoadingEditingProfileSecret ||
+                            (editingProfileSecretMissing && !editingProfileForm.api_key.trim())
+                          }
                           onClick={() => {
                             const executionMode = normalizeExecutionMode(
                               editingProfileForm.execution_mode,
@@ -245,6 +319,10 @@ export function TargetConfigPage() {
                           className="ghost-btn"
                           onClick={() => {
                             setEditingProfileId(null);
+                            setEditingProfileSecretMissing(false);
+                            setEditingProfileSecretVisible(false);
+                            setEditingProfileSecretError(null);
+                            setIsLoadingEditingProfileSecret(false);
                           }}
                           type="button"
                         >
@@ -265,16 +343,7 @@ export function TargetConfigPage() {
                         <button
                           className="ghost-btn"
                           onClick={() => {
-                            setEditingProfileId(profile.id);
-                            const executionMode = normalizeExecutionMode(profile.execution_mode);
-                            setEditingProfileForm({
-                              name: profile.name,
-                              provider: PROVIDER_BY_EXECUTION_MODE[executionMode],
-                              execution_mode: executionMode,
-                              model_name: profile.model_name,
-                              base_url: profile.base_url,
-                              api_key: "",
-                            });
+                            void startEditingProfile(profile);
                           }}
                           type="button"
                         >

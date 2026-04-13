@@ -3,6 +3,7 @@ import {
   exportComparisonRunReport,
   deleteProfile,
   deleteWindowBinding,
+  getProfileSecret,
   listProfiles,
   getComparisonRun,
   getComparisonSummary,
@@ -75,6 +76,7 @@ describe("target config tauri bindings", () => {
       base_url: "https://api.example.com/v1",
       api_key: "secret",
     });
+    await getProfileSecret("profile-1");
     await deleteProfile("profile-1");
     await updateWindowBinding("binding-1", {
       display_name: "Window A",
@@ -95,8 +97,9 @@ describe("target config tauri bindings", () => {
         api_key: "secret",
       },
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(3, "delete_profile", { id: "profile-1" });
-    expect(invokeMock).toHaveBeenNthCalledWith(4, "update_window_binding", {
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "get_profile_secret", { id: "profile-1" });
+    expect(invokeMock).toHaveBeenNthCalledWith(4, "delete_profile", { id: "profile-1" });
+    expect(invokeMock).toHaveBeenNthCalledWith(5, "update_window_binding", {
       id: "binding-1",
       input: {
         display_name: "Window A",
@@ -104,6 +107,6 @@ describe("target config tauri bindings", () => {
         profile_id: "profile-1",
       },
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(5, "delete_window_binding", { id: "binding-1" });
+    expect(invokeMock).toHaveBeenNthCalledWith(6, "delete_window_binding", { id: "binding-1" });
   });
 });

@@ -16,7 +16,7 @@ use iterm_mcp_tools_lib::{
             ItermExecutionRequest, ItermExecutionResult, ItermMcpAdapter, ItermSessionInfo,
         },
         profile_service::ProfileService,
-        secret_store::MemorySecretStore,
+        secret_store::{MemorySecretStore, SecretStore},
         window_binding_service::WindowBindingService,
         window_binding_sync_service::{create_window_binding_and_sync, WindowBindingSyncService},
     },
@@ -100,7 +100,8 @@ impl ItermMcpAdapter for RecordingAdapter {
 #[tokio::test]
 async fn creates_and_lists_window_bindings() -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
-    let profile_service = ProfileService::new(pool.clone());
+    let profile_service =
+        ProfileService::with_secret_store(pool.clone(), Arc::new(MemorySecretStore::default()));
     let binding_service = WindowBindingService::new(pool);
 
     let profile = profile_service
@@ -155,7 +156,8 @@ async fn rejects_window_binding_when_profile_does_not_exist(
 #[tokio::test]
 async fn syncs_last_seen_for_online_window_bindings() -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
-    let profile_service = ProfileService::new(pool.clone());
+    let profile_service =
+        ProfileService::with_secret_store(pool.clone(), Arc::new(MemorySecretStore::default()));
     let binding_service = WindowBindingService::new(pool);
 
     let profile = profile_service
@@ -453,10 +455,55 @@ async fn rolls_back_created_binding_when_window_sync_fails(
 }
 
 #[tokio::test]
+async fn surfaces_profile_name_when_binding_sync_secret_is_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude Missing Secret".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-sonnet-4".to_string(),
+            base_url: "https://gateway.example.com".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    secret_store.delete_secret(&profile.api_key_encrypted)?;
+
+    let result = create_window_binding_and_sync(
+        pool.clone(),
+        RecordingAdapter::default(),
+        secret_store,
+        CreateWindowBindingInput {
+            iterm_session_id: "session-missing-secret".to_string(),
+            display_name: "Window Missing Secret".to_string(),
+            profile_id: profile.id,
+        },
+    )
+    .await;
+
+    let error_message = result.err().map(|error| error.to_string()).unwrap_or_default();
+    assert!(error_message.contains("profile `Claude Missing Secret`"));
+    assert!(error_message.contains("Window Missing Secret"));
+    assert!(error_message.contains("re-save the API key"));
+
+    let binding_service = WindowBindingService::new(pool);
+    let bindings = binding_service.list_window_bindings().await?;
+    assert!(bindings.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn sync_removes_unreferenced_bindings_for_closed_sessions(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
-    let profile_service = ProfileService::new(pool.clone());
+    let profile_service =
+        ProfileService::with_secret_store(pool.clone(), Arc::new(MemorySecretStore::default()));
     let binding_service = WindowBindingService::new(pool);
 
     let profile = profile_service
