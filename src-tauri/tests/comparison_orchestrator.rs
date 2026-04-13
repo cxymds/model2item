@@ -649,6 +649,17 @@ async fn broadcasts_follow_up_input_into_running_target_sessions(
         })
         .count();
     assert_eq!(follow_up_count, 1);
+    let follow_up_text = sent_texts
+        .iter()
+        .find(|(session_id, text)| {
+            session_id == "session-ok" && text.contains("Continue with parser edge cases")
+        })
+        .map(|(_, text)| text.clone())
+        .expect("follow-up prompt should be sent to the running session");
+    assert!(
+        follow_up_text.ends_with('\r'),
+        "follow-up prompt should include an explicit return key so the request is submitted"
+    );
 
     let stored_messages =
         sqlx::query_scalar::<_, String>("SELECT content FROM messages ORDER BY created_at ASC")

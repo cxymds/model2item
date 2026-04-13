@@ -391,7 +391,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                 .unwrap_or_default();
             match self
                 .adapter
-                .send_text(&target.iterm_session_id, &format!("{prompt}\n"))
+                .send_text(&target.iterm_session_id, &format!("{prompt}\r"))
                 .await
             {
                 Ok(()) => {
