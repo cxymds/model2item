@@ -132,6 +132,12 @@ struct OpenaiOnlyAdapter {
     screen_reads: Arc<Mutex<HashMap<String, usize>>>,
 }
 
+#[derive(Clone, Default)]
+struct EarlyFailureScreenAdapter {
+    sent_texts: Arc<Mutex<Vec<(String, String)>>>,
+    screen_reads: Arc<Mutex<HashMap<String, usize>>>,
+}
+
 #[async_trait]
 impl ItermMcpAdapter for OpenaiOnlyAdapter {
     async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
@@ -165,6 +171,55 @@ impl ItermMcpAdapter for OpenaiOnlyAdapter {
         _request: ItermExecutionRequest,
     ) -> Result<ItermExecutionResult, String> {
         Err("adapter execute_prompt should not be used for openai_chat".to_string())
+    }
+}
+
+#[async_trait]
+impl ItermMcpAdapter for EarlyFailureScreenAdapter {
+    async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
+        let reads = self
+            .screen_reads
+            .lock()
+            .expect("screen_reads mutex")
+            .get("session-early-fail")
+            .copied()
+            .unwrap_or_default();
+
+        if reads >= 10 {
+            Ok(vec![])
+        } else {
+            Ok(vec![ItermSessionInfo {
+                session_id: "session-early-fail".to_string(),
+                window_id: "window-early-fail".to_string(),
+                window_title: "Window Early Fail".to_string(),
+                tab_id: "tab-early-fail".to_string(),
+                tab_title: "Tab Early Fail".to_string(),
+                session_title: "Pane Early Fail".to_string(),
+            }])
+        }
+    }
+
+    async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String> {
+        self.sent_texts
+            .lock()
+            .expect("sent_texts mutex")
+            .push((session_id.to_string(), text.to_string()));
+        Ok(())
+    }
+
+    async fn get_screen_text(&self, session_id: &str) -> Result<String, String> {
+        let mut screen_reads = self.screen_reads.lock().expect("screen_reads mutex");
+        let current = screen_reads.entry(session_id.to_string()).or_insert(0);
+        *current += 1;
+
+        Ok("error: missing auth token for upstream provider".to_string())
+    }
+
+    async fn execute_prompt(
+        &self,
+        _request: ItermExecutionRequest,
+    ) -> Result<ItermExecutionResult, String> {
+        Err("execute_prompt should not be used for interactive CLI targets".to_string())
     }
 }
 
@@ -985,6 +1040,79 @@ async fn openai_chat_targets_complete_without_terminal_incremental_capture(
     let requests = openai_executor.requests.lock().expect("requests mutex");
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].execution_mode, "openai_chat");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn cli_target_failure_includes_early_screen_output_in_error_detail(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = EarlyFailureScreenAdapter::default();
+    let orchestrator = ComparisonOrchestrator::with_dependencies(
+        pool.clone(),
+        secret_store.clone(),
+        adapter,
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude CLI GLM".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "glm5.1".to_string(),
+            base_url: "https://api.example.com".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Early fail case".to_string(),
+            prompt: "Summarize the parser".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-early-fail".to_string(),
+            display_name: "Window Early Fail".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "CLI early fail".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.execute_run(&run.id).await?;
+
+    let targets = run_service.list_comparison_targets(&run.id).await?;
+    let target = targets
+        .iter()
+        .find(|target| target.window_binding_id == binding.id)
+        .expect("failed target should exist");
+    assert_eq!(target.status, "failed");
+    assert_eq!(target.error_category.as_deref(), Some("adapter_error"));
+    assert!(
+        target
+            .error_detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("missing auth token for upstream provider")
+    );
 
     Ok(())
 }

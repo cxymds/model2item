@@ -100,7 +100,7 @@ impl ProfileService {
 
     pub async fn list_profiles(&self) -> Result<Vec<ModelProfileRecord>, AppError> {
         let rows = sqlx::query_as::<_, ModelProfileRecord>(
-            "SELECT * FROM model_profiles ORDER BY created_at DESC",
+            "SELECT * FROM model_profiles WHERE enabled = 1 ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -168,23 +168,85 @@ impl ProfileService {
     }
 
     pub async fn delete_profile(&self, id: &str) -> Result<(), AppError> {
-        let binding_count = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(1) FROM window_bindings WHERE profile_id = ?",
+        let now = Utc::now().to_rfc3339();
+        let active_binding_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(1)
+            FROM window_bindings wb
+            JOIN comparison_targets ct ON ct.window_binding_id = wb.id
+            JOIN comparison_runs cr ON cr.id = ct.run_id
+            WHERE wb.profile_id = ?
+              AND cr.status IN ('queued', 'running')
+            "#,
         )
         .bind(id)
         .fetch_one(&self.pool)
         .await?;
 
-        if binding_count > 0 {
+        if active_binding_count > 0 {
             return Err(AppError::InvalidInput(
-                "profile is still referenced by window bindings".to_string(),
+                "profile is still referenced by active window bindings".to_string(),
             ));
         }
 
-        sqlx::query("DELETE FROM model_profiles WHERE id = ?")
-            .bind(id)
-            .execute(&self.pool)
+        let binding_ids = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM window_bindings WHERE profile_id = ?",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut has_historical_bindings = false;
+
+        let mut tx = self.pool.begin().await?;
+
+        for binding_id in binding_ids {
+            let historical_reference_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(1) FROM comparison_targets WHERE window_binding_id = ?",
+            )
+            .bind(&binding_id)
+            .fetch_one(&mut *tx)
             .await?;
+
+            if historical_reference_count > 0 {
+                has_historical_bindings = true;
+                sqlx::query(
+                    r#"
+                    UPDATE window_bindings
+                    SET enabled = 0, metadata_json = '{"deleted":true}'
+                    WHERE id = ?
+                    "#,
+                )
+                .bind(&binding_id)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                sqlx::query("DELETE FROM window_bindings WHERE id = ?")
+                    .bind(&binding_id)
+                    .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        if has_historical_bindings {
+            sqlx::query(
+                r#"
+                UPDATE model_profiles
+                SET enabled = 0, updated_at = ?
+                WHERE id = ?
+                "#,
+            )
+            .bind(&now)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        } else {
+            sqlx::query("DELETE FROM model_profiles WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        tx.commit().await?;
         let _ = self.secret_store.delete_secret(&profile_secret_locator(id));
 
         Ok(())

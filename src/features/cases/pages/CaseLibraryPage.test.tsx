@@ -84,11 +84,16 @@ describe("CaseLibraryPage", () => {
     });
   });
 
-  it("shows an error when deleting a referenced evaluation case", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("requires an inline confirmation before deleting a referenced evaluation case", async () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "删除 Legacy parser walkthrough" }));
+    expect(
+      await screen.findByRole("button", { name: "确认删除 Legacy parser walkthrough" }),
+    ).toBeInTheDocument();
+    expect(deleteEvaluationCase).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认删除 Legacy parser walkthrough" }));
 
     await screen.findByText("已被运行任务引用，暂时不能删除");
     expect(deleteEvaluationCase).toHaveBeenCalled();

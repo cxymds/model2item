@@ -164,6 +164,25 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
         )))
     }
 
+    async fn enrich_cli_error_with_screen(
+        &self,
+        session_id: &str,
+        baseline_screen: &str,
+        error: String,
+    ) -> String {
+        match self.read_screen_text(session_id).await {
+            Ok(screen_text) => {
+                let delta = Self::extract_incremental_output(baseline_screen, &screen_text);
+                if delta.is_empty() || error.contains(&delta) {
+                    error
+                } else {
+                    format!("{error}\n\nTerminal output:\n{delta}")
+                }
+            }
+            Err(_) => error,
+        }
+    }
+
     pub fn with_dependencies(
         pool: sqlx::SqlitePool,
         secret_store: Arc<dyn SecretStore>,
@@ -428,6 +447,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
         let result = if target.execution_mode == "openai_chat" {
             self.openai_executor.execute_chat_completion(&request).await
         } else {
+            let baseline_before_launch = String::new();
             let launch_command = build_claude_cli_launch_command(&request);
             match launch_command {
                 Ok(command) => {
@@ -436,7 +456,14 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                         .send_text(&target.iterm_session_id, &command)
                         .await
                     {
-                        Err(error)
+                        Err(
+                            self.enrich_cli_error_with_screen(
+                                &target.iterm_session_id,
+                                &baseline_before_launch,
+                                error,
+                            )
+                            .await,
+                        )
                     } else {
                         tokio::time::sleep(Duration::from_millis(1200)).await;
                         if let Err(error) = self
@@ -444,19 +471,44 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                             .send_text(&target.iterm_session_id, &format!("{request_prompt}\n"))
                             .await
                         {
-                            Err(error)
+                            Err(
+                                self.enrich_cli_error_with_screen(
+                                    &target.iterm_session_id,
+                                    &baseline_before_launch,
+                                    error,
+                                )
+                                .await,
+                            )
                         } else {
                             tokio::time::sleep(Duration::from_millis(250)).await;
                             match self.read_screen_text(&target.iterm_session_id).await {
-                                Ok(baseline_after_prompt) => self
-                                    .capture_incremental_interactive_output(
+                                Ok(baseline_after_prompt) => {
+                                    match self
+                                        .capture_incremental_interactive_output(
+                                            &target.iterm_session_id,
+                                            &baseline_after_prompt,
+                                        )
+                                        .await
+                                    {
+                                        Ok((_, delta)) => Ok(delta),
+                                        Err(error) => Err(
+                                            self.enrich_cli_error_with_screen(
+                                                &target.iterm_session_id,
+                                                &baseline_before_launch,
+                                                error.to_string(),
+                                            )
+                                            .await,
+                                        ),
+                                    }
+                                }
+                                Err(error) => Err(
+                                    self.enrich_cli_error_with_screen(
                                         &target.iterm_session_id,
-                                        &baseline_after_prompt,
+                                        &baseline_before_launch,
+                                        error.to_string(),
                                     )
-                                    .await
-                                    .map(|(_, delta)| delta)
-                                    .map_err(|error| error.to_string()),
-                                Err(error) => Err(error.to_string()),
+                                    .await,
+                                ),
                             }
                         }
                     }

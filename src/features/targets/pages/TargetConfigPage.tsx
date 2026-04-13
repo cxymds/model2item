@@ -36,6 +36,7 @@ export function TargetConfigPage() {
   const [editingProfileSecretVisible, setEditingProfileSecretVisible] = useState(false);
   const [editingProfileSecretError, setEditingProfileSecretError] = useState<string | null>(null);
   const [isLoadingEditingProfileSecret, setIsLoadingEditingProfileSecret] = useState(false);
+  const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string | null>(null);
   const [editingProfileForm, setEditingProfileForm] = useState<UpdateProfileInput>({
     name: "",
     provider: "anthropic",
@@ -353,13 +354,37 @@ export function TargetConfigPage() {
                           className="ghost-btn"
                           disabled={deleteProfileMutation.isPending}
                           onClick={() => {
-                            if (!window.confirm(`确认删除配置“${profile.name}”吗？`)) return;
-                            deleteProfileMutation.mutate(profile.id);
+                            setPendingDeleteProfileId(profile.id);
                           }}
                           type="button"
                         >
                           删除配置 {profile.name}
                         </button>
+                        {pendingDeleteProfileId === profile.id ? (
+                          <>
+                            <button
+                              className="primary-btn"
+                              disabled={deleteProfileMutation.isPending}
+                              onClick={() => {
+                                deleteProfileMutation.mutate(profile.id);
+                                setPendingDeleteProfileId(null);
+                              }}
+                              type="button"
+                            >
+                              确认删除配置 {profile.name}
+                            </button>
+                            <button
+                              className="ghost-btn"
+                              disabled={deleteProfileMutation.isPending}
+                              onClick={() => {
+                                setPendingDeleteProfileId(null);
+                              }}
+                              type="button"
+                            >
+                              取消删除
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </>
                   )}

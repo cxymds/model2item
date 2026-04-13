@@ -165,6 +165,7 @@ export type ComparisonSummaryTargetResponse = {
   duration_ms: number | null;
   response_chars: number;
   response_lines: number;
+  error_detail: string | null;
 };
 
 export type ComparisonSummaryResponse = {

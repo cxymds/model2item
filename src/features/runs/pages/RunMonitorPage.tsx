@@ -280,17 +280,25 @@ export function RunMonitorPage() {
                 : "最新输出"
             }
             details={
-              <TargetConversationDrawer
-                expanded={expandedTargetIds.includes(target.id)}
-                onToggle={() => {
-                  setExpandedTargetIds((current) =>
-                    current.includes(target.id)
-                      ? current.filter((id) => id !== target.id)
-                      : [...current, target.id],
-                  );
-                }}
-                targetId={target.id}
-              />
+              <>
+                {target.errorDetail ? (
+                  <div>
+                    <strong>失败原因</strong>
+                    <p style={{ whiteSpace: "pre-wrap" }}>{target.errorDetail}</p>
+                  </div>
+                ) : null}
+                <TargetConversationDrawer
+                  expanded={expandedTargetIds.includes(target.id)}
+                  onToggle={() => {
+                    setExpandedTargetIds((current) =>
+                      current.includes(target.id)
+                        ? current.filter((id) => id !== target.id)
+                        : [...current, target.id],
+                    );
+                  }}
+                  targetId={target.id}
+                />
+              </>
             }
           />
         ))}

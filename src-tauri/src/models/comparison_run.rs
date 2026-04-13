@@ -132,6 +132,7 @@ pub struct ComparisonSummaryTargetResponse {
     pub duration_ms: Option<i64>,
     pub response_chars: i64,
     pub response_lines: i64,
+    pub error_detail: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

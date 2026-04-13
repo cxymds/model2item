@@ -9,9 +9,13 @@ use iterm_mcp_tools_lib::{
     error::AppError,
     models::{
         profile::{CreateProfileInput, UpdateProfileInput},
+        comparison_run::CreateComparisonRunInput,
+        evaluation_case::CreateEvaluationCaseInput,
         window_binding::CreateWindowBindingInput,
     },
     services::{
+        comparison_run_service::ComparisonRunService,
+        evaluation_case_service::EvaluationCaseService,
         profile_service::ProfileService,
         secret_store::{profile_secret_locator, MemorySecretStore, SecretStore},
         window_binding_service::WindowBindingService,
@@ -377,10 +381,11 @@ async fn deletes_profile_when_not_bound() -> Result<(), Box<dyn std::error::Erro
 }
 
 #[tokio::test]
-async fn rejects_deleting_profile_when_bound_to_window() -> Result<(), Box<dyn std::error::Error>> {
+async fn deletes_profile_and_unreferenced_bindings_together(
+) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
     let secret_store = Arc::new(MemorySecretStore::default());
-    let service = ProfileService::with_secret_store(pool.clone(), secret_store);
+    let service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
     let binding_service = WindowBindingService::new(pool.clone());
 
     let created = service
@@ -402,8 +407,139 @@ async fn rejects_deleting_profile_when_bound_to_window() -> Result<(), Box<dyn s
         })
         .await?;
 
+    service.delete_profile(&created.id).await?;
+
+    let listed_profiles = service.list_profiles().await?;
+    assert!(listed_profiles.is_empty());
+    let listed_bindings = binding_service.list_window_bindings().await?;
+    assert!(listed_bindings.is_empty());
+    assert!(secret_store
+        .get_secret(&profile_secret_locator(&created.id))
+        .is_none());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn rejects_deleting_profile_when_its_binding_is_referenced_by_active_run(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool.clone(), secret_store);
+    let binding_service = WindowBindingService::new(pool.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-1".to_string(),
+            display_name: "Window A".to_string(),
+            profile_id: created.id.clone(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Legacy parser".to_string(),
+            prompt: "Explain parser".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Benchmark".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
     let result = service.delete_profile(&created.id).await;
-    assert!(matches!(result, Err(AppError::InvalidInput(_))));
+    assert!(matches!(result, Err(AppError::InvalidInput(message)) if message.contains("active window bindings")));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn soft_deletes_profile_when_finished_run_history_still_references_its_bindings(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-history".to_string(),
+            display_name: "Window History".to_string(),
+            profile_id: created.id.clone(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Legacy parser".to_string(),
+            prompt: "Explain parser".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Finished Benchmark".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    run_service.finalize_run(&run.id, "done").await?;
+
+    service.delete_profile(&created.id).await?;
+
+    let listed_profiles = service.list_profiles().await?;
+    assert!(listed_profiles.is_empty());
+
+    let raw_enabled = sqlx::query_scalar::<_, i64>(
+        "SELECT enabled FROM model_profiles WHERE id = ?",
+    )
+    .bind(&created.id)
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(raw_enabled, 0);
+
+    let bindings = binding_service.list_window_bindings().await?;
+    assert!(bindings.is_empty());
+    assert!(secret_store
+        .get_secret(&profile_secret_locator(&created.id))
+        .is_none());
 
     Ok(())
 }

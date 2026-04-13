@@ -1,0 +1,2 @@
+ALTER TABLE model_profiles
+ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;

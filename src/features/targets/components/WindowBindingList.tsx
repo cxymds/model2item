@@ -43,6 +43,7 @@ export function WindowBindingList({
     profile_id: "",
   });
   const [editingBindingId, setEditingBindingId] = useState<string | null>(null);
+  const [pendingDeleteBindingId, setPendingDeleteBindingId] = useState<string | null>(null);
   const [editingForm, setEditingForm] = useState<UpdateWindowBindingInput>({
     iterm_session_id: "",
     display_name: "",
@@ -269,13 +270,37 @@ export function WindowBindingList({
                           className="ghost-btn"
                           disabled={isDeletingBinding}
                           onClick={() => {
-                            if (!window.confirm(`确认删除绑定“${binding.display_name}”吗？`)) return;
-                            onDelete(binding.id);
+                            setPendingDeleteBindingId(binding.id);
                           }}
                           type="button"
                         >
                           删除 {binding.display_name}
                         </button>
+                        {pendingDeleteBindingId === binding.id ? (
+                          <>
+                            <button
+                              className="primary-btn"
+                              disabled={isDeletingBinding}
+                              onClick={() => {
+                                onDelete(binding.id);
+                                setPendingDeleteBindingId(null);
+                              }}
+                              type="button"
+                            >
+                              确认删除 {binding.display_name}
+                            </button>
+                            <button
+                              className="ghost-btn"
+                              disabled={isDeletingBinding}
+                              onClick={() => {
+                                setPendingDeleteBindingId(null);
+                              }}
+                              type="button"
+                            >
+                              取消删除
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </>
                   )}

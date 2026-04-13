@@ -35,6 +35,7 @@ export type RunTargetViewModel = {
   status: RunTargetStatus;
   statusText: string;
   summary: string;
+  errorDetail: string | null;
   metricRow: MetricRow;
 };
 
@@ -59,13 +60,18 @@ export function buildRunTargetViewModel(target: ComparisonTargetResponse): RunTa
   const label = buildRunTargetLabel(target);
   const status = mapRunTargetStatus(target.status);
   const statusText = getLocalizedRunStatusText(target.status);
+  const errorDetail = target.error_detail?.trim() ? target.error_detail.trim() : null;
+  const summary = errorDetail
+    ? `状态：${statusText}，行数：${target.response_lines}，字符数：${target.response_chars}，失败原因：${errorDetail}`
+    : `状态：${statusText}，行数：${target.response_lines}，字符数：${target.response_chars}`;
 
   return {
     id: target.id,
     label,
     status,
     statusText,
-    summary: `状态：${statusText}，行数：${target.response_lines}，字符数：${target.response_chars}`,
+    summary,
+    errorDetail,
     metricRow: {
       model: label,
       passAt1: target.success_status === "success" ? "1" : target.success_status === null ? "-" : "0",
@@ -84,12 +90,18 @@ export function buildRunTargetViewModels(targets: ComparisonTargetResponse[]): R
 export function buildRunTargetViewModelFromSummary(
   target: ComparisonSummaryTargetResponse,
 ): RunTargetViewModel {
+  const errorDetail = target.error_detail?.trim() ? target.error_detail.trim() : null;
+  const summary = errorDetail
+    ? `状态：${getLocalizedRunStatusText(target.status)}，行数：${target.response_lines}，字符数：${target.response_chars}，失败原因：${errorDetail}`
+    : `状态：${getLocalizedRunStatusText(target.status)}，行数：${target.response_lines}，字符数：${target.response_chars}`;
+
   return {
     id: target.target_id,
     label: target.label,
     status: mapRunTargetStatus(target.status),
     statusText: getLocalizedRunStatusText(target.status),
-    summary: `状态：${getLocalizedRunStatusText(target.status)}，行数：${target.response_lines}，字符数：${target.response_chars}`,
+    summary,
+    errorDetail,
     metricRow: {
       model: target.label,
       passAt1: target.success_status === "success" ? "1" : target.success_status === null ? "-" : "0",

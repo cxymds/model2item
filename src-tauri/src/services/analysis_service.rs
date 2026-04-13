@@ -93,6 +93,7 @@ pub fn build_comparison_summary(
                 duration_ms: target.duration_ms,
                 response_chars: target.response_chars,
                 response_lines: target.response_lines,
+                error_detail: target.error_detail,
             }
         })
         .collect::<Vec<_>>();

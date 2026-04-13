@@ -18,6 +18,7 @@ function getErrorMessage(error: unknown) {
 export function CaseLibraryPage() {
   const queryClient = useQueryClient();
   const [editingCaseId, setEditingCaseId] = useState<string | null>(null);
+  const [pendingDeleteCaseId, setPendingDeleteCaseId] = useState<string | null>(null);
   const casesQuery = useQuery({
     queryKey: ["evaluation-cases"],
     queryFn: listEvaluationCases,
@@ -125,13 +126,37 @@ export function CaseLibraryPage() {
                         <button
                           className="ghost-btn"
                           onClick={() => {
-                            if (!window.confirm(`确认删除案例“${item.title}”吗？`)) return;
-                            deleteCaseMutation.mutate(item.id);
+                            setPendingDeleteCaseId(item.id);
                           }}
                           type="button"
                         >
                           删除 {item.title}
                         </button>
+                        {pendingDeleteCaseId === item.id ? (
+                          <>
+                            <button
+                              className="primary-btn"
+                              disabled={deleteCaseMutation.isPending}
+                              onClick={() => {
+                                deleteCaseMutation.mutate(item.id);
+                                setPendingDeleteCaseId(null);
+                              }}
+                              type="button"
+                            >
+                              确认删除 {item.title}
+                            </button>
+                            <button
+                              className="ghost-btn"
+                              disabled={deleteCaseMutation.isPending}
+                              onClick={() => {
+                                setPendingDeleteCaseId(null);
+                              }}
+                              type="button"
+                            >
+                              取消删除
+                            </button>
+                          </>
+                        ) : null}
                       </div>
                     </>
                   )}

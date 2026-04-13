@@ -177,11 +177,14 @@ describe("TargetConfigPage", () => {
     });
   });
 
-  it("shows an error when deleting a referenced binding", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("requires an inline confirmation before deleting a referenced binding", async () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "删除 Window A" }));
+    expect(await screen.findByRole("button", { name: "确认删除 Window A" })).toBeInTheDocument();
+    expect(deleteWindowBinding).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认删除 Window A" }));
 
     await screen.findByText("已被运行任务引用，暂时不能删除");
     expect(deleteWindowBinding).toHaveBeenCalled();
@@ -305,11 +308,14 @@ describe("TargetConfigPage", () => {
     });
   });
 
-  it("deletes an unused profile", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("requires an inline confirmation before deleting an unused profile", async () => {
     renderPage();
 
     fireEvent.click(await screen.findByRole("button", { name: "删除配置 GPT-5.4 baseline" }));
+    expect(await screen.findByRole("button", { name: "确认删除配置 GPT-5.4 baseline" })).toBeInTheDocument();
+    expect(deleteProfile).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认删除配置 GPT-5.4 baseline" }));
 
     await waitFor(() => {
       expect(deleteProfile.mock.calls[0]?.[0]).toBe("profile-1");

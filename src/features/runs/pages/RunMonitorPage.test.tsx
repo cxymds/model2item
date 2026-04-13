@@ -4,8 +4,42 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { vi } from "vitest";
 import { RunMonitorPage } from "./RunMonitorPage";
 
-const { sendComparisonRunMessageMock } = vi.hoisted(() => {
+const { getComparisonRunMock, listComparisonTargetsMock, sendComparisonRunMessageMock } = vi.hoisted(() => {
   return {
+    getComparisonRunMock: vi.fn().mockResolvedValue({
+      id: "run-1",
+      evaluation_case_id: "case-1",
+      title: "Legacy parser benchmark",
+      status: "running",
+      prompt_snapshot: "prompt",
+      context_snapshot: "{}",
+      created_at: "2026-01-01T00:00:00Z",
+      started_at: "2026-01-01T00:00:01Z",
+      finished_at: null,
+      notes: "",
+    }),
+    listComparisonTargetsMock: vi.fn().mockResolvedValue([
+      {
+        position: 0,
+        id: "target-1",
+        run_id: "run-1",
+        window_binding_id: "binding-1",
+        profile_snapshot_json:
+          '{"position":0,"display_name":"Window A","profile_id":"profile-1","provider":"openai","model_name":"gpt-5.4","base_url":"https://api.openai.com"}',
+        status: "running",
+        sent_at: "2026-01-01T00:00:01Z",
+        first_response_at: null,
+        finished_at: null,
+        duration_ms: null,
+        response_chars: 0,
+        response_lines: 0,
+        success_status: null,
+        error_category: null,
+        error_detail: null,
+        latest_message_role: "assistant",
+        latest_message_content: "最新窗口输出：已经进入交互式 Claude 会话。",
+      },
+    ]),
     sendComparisonRunMessageMock: vi.fn().mockResolvedValue(undefined),
   };
 });
@@ -43,7 +77,19 @@ const { listTargetMessagesMock } = vi.hoisted(() => {
 
 vi.mock("../../../lib/tauri", () => {
   return {
-    getComparisonRun: vi.fn().mockResolvedValue({
+    getComparisonRun: getComparisonRunMock,
+    listComparisonTargets: listComparisonTargetsMock,
+    startComparisonRun: vi.fn().mockResolvedValue(undefined),
+    sendComparisonRunMessage: sendComparisonRunMessageMock,
+    listTargetMessages: listTargetMessagesMock,
+  };
+});
+
+describe("RunMonitorPage", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    getComparisonRunMock.mockClear();
+    getComparisonRunMock.mockResolvedValue({
       id: "run-1",
       evaluation_case_id: "case-1",
       title: "Legacy parser benchmark",
@@ -54,8 +100,9 @@ vi.mock("../../../lib/tauri", () => {
       started_at: "2026-01-01T00:00:01Z",
       finished_at: null,
       notes: "",
-    }),
-    listComparisonTargets: vi.fn().mockResolvedValue([
+    });
+    listComparisonTargetsMock.mockClear();
+    listComparisonTargetsMock.mockResolvedValue([
       {
         position: 0,
         id: "target-1",
@@ -76,16 +123,7 @@ vi.mock("../../../lib/tauri", () => {
         latest_message_role: "assistant",
         latest_message_content: "最新窗口输出：已经进入交互式 Claude 会话。",
       },
-    ]),
-    startComparisonRun: vi.fn().mockResolvedValue(undefined),
-    sendComparisonRunMessage: sendComparisonRunMessageMock,
-    listTargetMessages: listTargetMessagesMock,
-  };
-});
-
-describe("RunMonitorPage", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
+    ]);
     sendComparisonRunMessageMock.mockClear();
     listTargetMessagesMock.mockClear();
   });
@@ -207,5 +245,59 @@ describe("RunMonitorPage", () => {
     expect(screen.getByRole("button", { name: "冻结跟随" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "冻结跟随" }));
     expect(screen.getByRole("button", { name: "恢复跟随" })).toBeInTheDocument();
+  });
+
+  it("shows the recorded failure reason for failed targets", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    getComparisonRunMock.mockResolvedValueOnce({
+      id: "run-1",
+      evaluation_case_id: "case-1",
+      title: "Legacy parser benchmark",
+      status: "failed",
+      prompt_snapshot: "prompt",
+      context_snapshot: "{}",
+      created_at: "2026-01-01T00:00:00Z",
+      started_at: "2026-01-01T00:00:01Z",
+      finished_at: "2026-01-01T00:00:05Z",
+      notes: "",
+    });
+    listComparisonTargetsMock.mockResolvedValueOnce([
+      {
+        position: 0,
+        id: "target-1",
+        run_id: "run-1",
+        window_binding_id: "binding-1",
+        profile_snapshot_json:
+          '{"position":0,"display_name":"Window A","profile_id":"profile-1","execution_mode":"claude_cli","provider":"anthropic","model_name":"glm5.1","base_url":"https://api.example.com"}',
+        status: "failed",
+        sent_at: "2026-01-01T00:00:01Z",
+        first_response_at: null,
+        finished_at: "2026-01-01T00:00:05Z",
+        duration_ms: 4000,
+        response_chars: 0,
+        response_lines: 0,
+        success_status: "failed",
+        error_category: "adapter_error",
+        error_detail: "spawned CLI exited immediately: missing auth token",
+        latest_message_role: "system",
+        latest_message_content: "spawned CLI exited immediately: missing auth token",
+      },
+    ]);
+
+    render(
+      <MemoryRouter initialEntries={["/runs/run-1"]}>
+        <QueryClientProvider client={queryClient}>
+          <Routes>
+            <Route path="/runs/:runId" element={<RunMonitorPage />} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("失败原因")).toBeInTheDocument();
+    expect(screen.getAllByText("spawned CLI exited immediately: missing auth token").length).toBeGreaterThan(0);
   });
 });
