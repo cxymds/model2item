@@ -121,6 +121,12 @@ struct DelayedOutputAdapter {
 }
 
 #[derive(Clone, Default)]
+struct ClosingSessionAdapter {
+    sent_texts: Arc<Mutex<Vec<(String, String)>>>,
+    screen_reads: Arc<Mutex<HashMap<String, usize>>>,
+}
+
+#[derive(Clone, Default)]
 struct OpenaiOnlyAdapter {
     sent_texts: Arc<Mutex<Vec<(String, String)>>>,
     screen_reads: Arc<Mutex<HashMap<String, usize>>>,
@@ -159,6 +165,59 @@ impl ItermMcpAdapter for OpenaiOnlyAdapter {
         _request: ItermExecutionRequest,
     ) -> Result<ItermExecutionResult, String> {
         Err("adapter execute_prompt should not be used for openai_chat".to_string())
+    }
+}
+
+#[async_trait]
+impl ItermMcpAdapter for ClosingSessionAdapter {
+    async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
+        let reads = self
+            .screen_reads
+            .lock()
+            .expect("screen_reads mutex")
+            .get("session-closing")
+            .copied()
+            .unwrap_or_default();
+
+        if reads >= 10 {
+            Ok(vec![])
+        } else {
+            Ok(vec![ItermSessionInfo {
+                session_id: "session-closing".to_string(),
+                window_id: "window-closing".to_string(),
+                window_title: "Window Closing".to_string(),
+                tab_id: "tab-closing".to_string(),
+                tab_title: "Tab Closing".to_string(),
+                session_title: "Pane Closing".to_string(),
+            }])
+        }
+    }
+
+    async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String> {
+        self.sent_texts
+            .lock()
+            .expect("sent_texts mutex")
+            .push((session_id.to_string(), text.to_string()));
+        Ok(())
+    }
+
+    async fn get_screen_text(&self, session_id: &str) -> Result<String, String> {
+        let mut screen_reads = self.screen_reads.lock().expect("screen_reads mutex");
+        let current = screen_reads.entry(session_id.to_string()).or_insert(0);
+        *current += 1;
+        Ok(String::new())
+    }
+
+    async fn execute_prompt(
+        &self,
+        request: ItermExecutionRequest,
+    ) -> Result<ItermExecutionResult, String> {
+        Ok(ItermExecutionResult {
+            output_text: format!(
+                "session={} provider={} model={}",
+                request.session_id, request.provider, request.model_name
+            ),
+        })
     }
 }
 
@@ -695,6 +754,80 @@ async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
             .unwrap_or_default()
             >= 3
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn fails_early_when_terminal_session_closes_before_new_output_arrives(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = ClosingSessionAdapter::default();
+    let orchestrator = ComparisonOrchestrator::with_dependencies(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude Closing".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Closing session case".to_string(),
+            prompt: "Wait for terminal output".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-closing".to_string(),
+            display_name: "Window Closing".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Closing terminal run".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.execute_run(&run.id).await?;
+
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "failed");
+
+    let targets = run_service.list_comparison_targets(&run.id).await?;
+    let target = targets
+        .iter()
+        .find(|target| target.window_binding_id == binding.id)
+        .expect("target should exist");
+    assert_eq!(target.status, "failed");
+    assert_eq!(target.error_category.as_deref(), Some("adapter_error"));
+    assert!(target
+        .error_detail
+        .as_deref()
+        .unwrap_or_default()
+        .contains("session session-closing closed before new interactive output arrived"));
 
     Ok(())
 }

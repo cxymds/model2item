@@ -130,12 +130,28 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
     ) -> Result<(String, String), AppError> {
         const MAX_SCREEN_READ_ATTEMPTS: usize = 20;
         const SCREEN_READ_INTERVAL_MS: u64 = 500;
+        const ONLINE_CHECK_INTERVAL_ATTEMPTS: usize = 10;
 
         for attempt in 0..MAX_SCREEN_READ_ATTEMPTS {
             let screen_text = self.read_screen_text(session_id).await?;
             let delta = Self::extract_incremental_output(baseline_screen, &screen_text);
             if !delta.is_empty() {
                 return Ok((screen_text, delta));
+            }
+
+            if (attempt + 1) % ONLINE_CHECK_INTERVAL_ATTEMPTS == 0 {
+                let session_is_online = self
+                    .adapter
+                    .list_sessions()
+                    .await
+                    .map_err(classify_adapter_error)?
+                    .into_iter()
+                    .any(|session| session.session_id == session_id);
+                if !session_is_online {
+                    return Err(AppError::Adapter(format!(
+                        "session {session_id} closed before new interactive output arrived"
+                    )));
+                }
             }
 
             if attempt + 1 < MAX_SCREEN_READ_ATTEMPTS {
