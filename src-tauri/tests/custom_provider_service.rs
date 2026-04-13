@@ -508,6 +508,184 @@ async fn deletes_backfilled_provider_using_stored_legacy_locator(
 }
 
 #[tokio::test]
+async fn deletes_provider_with_historical_bindings_by_disabling_bindings_and_clearing_reference(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = CustomProviderService::with_secret_store(pool.clone(), secret_store.clone());
+
+    let created = service
+        .create_custom_provider(CreateCustomProviderInput {
+            name: "Provider With History".to_string(),
+            provider_key: "glm".to_string(),
+            client_type: "claude_cli".to_string(),
+            base_url: "https://glm.example.com/v1".to_string(),
+            api_key: "secret-history".to_string(),
+            default_model: "glm-5.1".to_string(),
+            extra_params_json: "{}".to_string(),
+        })
+        .await?;
+
+    let placeholder_profile_id = "__provider_binding_profile__";
+    sqlx::query(
+        r#"
+        INSERT OR IGNORE INTO model_profiles
+          (id, name, provider, execution_mode, model_name, base_url, api_key_encrypted, created_at, updated_at)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(placeholder_profile_id)
+    .bind("Provider Binding Placeholder")
+    .bind("openai-compatible")
+    .bind("claude_cli")
+    .bind("provider-binding-placeholder")
+    .bind("")
+    .bind("secret://profile/__provider_binding_profile__")
+    .bind("2026-04-13T00:00:00Z")
+    .bind("2026-04-13T00:00:00Z")
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO evaluation_cases
+          (id, title, prompt, context_payload, expected_checkpoints_json, validation_rules_json, notes, created_at, updated_at)
+        VALUES
+          ('case-1', 'Case 1', 'Prompt', '{}', '[]', '{}', '', '2026-04-13T00:00:00Z', '2026-04-13T00:00:00Z')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO comparison_runs
+          (id, evaluation_case_id, title, status, prompt_snapshot, context_snapshot, created_at, started_at, finished_at, notes)
+        VALUES
+          ('run-1', 'case-1', 'Run 1', 'completed', 'Prompt', '{}', '2026-04-13T00:00:00Z', '2026-04-13T00:00:00Z', '2026-04-13T00:01:00Z', '')
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO window_bindings
+          (id, iterm_session_id, display_name, profile_id, custom_provider_id, enabled, metadata_json)
+        VALUES
+          ('binding-history', 'session-1', 'Window History', ?, ?, 1, '{}')
+        "#,
+    )
+    .bind(placeholder_profile_id)
+    .bind(&created.id)
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO comparison_targets
+          (id, run_id, window_binding_id, profile_snapshot_json, status, response_chars, response_lines)
+        VALUES
+          ('target-1', 'run-1', 'binding-history', '{}', 'completed', 10, 2)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    service.delete_custom_provider(&created.id).await?;
+
+    let provider_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(1) FROM custom_providers WHERE id = ?")
+            .bind(&created.id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(provider_count, 0);
+
+    let binding_state = sqlx::query_as::<_, (i64, Option<String>, String)>(
+        "SELECT enabled, custom_provider_id, metadata_json FROM window_bindings WHERE id = 'binding-history' LIMIT 1",
+    )
+    .fetch_one(&pool)
+    .await?;
+    assert_eq!(binding_state.0, 0);
+    assert_eq!(binding_state.1, None);
+    assert_eq!(binding_state.2, r#"{"deleted":true}"#);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn deletes_backfilled_provider_and_matching_legacy_profile(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = CustomProviderService::with_secret_store(pool.clone(), secret_store.clone());
+    let legacy_profile_id = "legacy-profile-1";
+    let provider_id = format!("provider-{legacy_profile_id}");
+    let legacy_locator = format!("secret://profile/{legacy_profile_id}");
+
+    secret_store.set_secret(&legacy_locator, "legacy-secret-delete")?;
+    sqlx::query(
+        r#"
+        INSERT INTO model_profiles
+          (id, name, provider, execution_mode, model_name, base_url, api_key_encrypted, created_at, updated_at)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(legacy_profile_id)
+    .bind("Legacy Profile")
+    .bind("glm")
+    .bind("claude_cli")
+    .bind("glm-5.1")
+    .bind("https://legacy.example.com/v1")
+    .bind(&legacy_locator)
+    .bind("2026-04-13T00:00:00Z")
+    .bind("2026-04-13T00:00:00Z")
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        INSERT INTO custom_providers
+          (id, name, provider_key, client_type, base_url, api_key_encrypted, default_model, enabled, extra_params_json, created_at, updated_at)
+        VALUES
+          (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+        "#,
+    )
+    .bind(&provider_id)
+    .bind("Legacy Provider")
+    .bind("glm")
+    .bind("claude_cli")
+    .bind("https://legacy.example.com/v1")
+    .bind(&legacy_locator)
+    .bind("glm-5.1")
+    .bind("{}")
+    .bind("2026-04-13T00:00:00Z")
+    .bind("2026-04-13T00:00:00Z")
+    .execute(&pool)
+    .await?;
+
+    service.delete_custom_provider(&provider_id).await?;
+
+    let provider_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(1) FROM custom_providers WHERE id = ?")
+            .bind(&provider_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(provider_count, 0);
+
+    let profile_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(1) FROM model_profiles WHERE id = ?")
+            .bind(legacy_profile_id)
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(profile_count, 0);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn does_not_store_secret_when_updating_missing_provider(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;

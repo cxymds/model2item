@@ -102,6 +102,26 @@ impl CustomProviderService {
         Ok(row)
     }
 
+    async fn find_backfilled_profile_id(&self, provider_id: &str) -> Result<Option<String>, AppError> {
+        let Some(profile_id) = provider_id.strip_prefix("provider-") else {
+            return Ok(None);
+        };
+
+        let profile_id = profile_id.to_string();
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(1) FROM model_profiles WHERE id = ?",
+        )
+        .bind(&profile_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if count == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(profile_id))
+        }
+    }
+
     pub async fn list_custom_providers(&self) -> Result<Vec<CustomProviderResponse>, AppError> {
         let rows = sqlx::query_as::<_, CustomProviderRecord>(
             "SELECT * FROM custom_providers WHERE enabled = 1 ORDER BY created_at DESC",
@@ -175,14 +195,133 @@ impl CustomProviderService {
 
     pub async fn delete_custom_provider(&self, id: &str) -> Result<(), AppError> {
         let provider = self.get_custom_provider_record(id).await?;
+        let legacy_profile_id = self.find_backfilled_profile_id(id).await?;
+
+        let active_binding_count = sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(1)
+            FROM window_bindings wb
+            JOIN comparison_targets ct ON ct.window_binding_id = wb.id
+            JOIN comparison_runs cr ON cr.id = ct.run_id
+            WHERE wb.custom_provider_id = ?
+              AND cr.status IN ('queued', 'running')
+            "#,
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if active_binding_count > 0 {
+            return Err(AppError::InvalidInput(
+                "provider is still referenced by active window bindings".to_string(),
+            ));
+        }
+
+        let binding_ids = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM window_bindings WHERE custom_provider_id = ?",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let placeholder_profile_id = self.ensure_provider_binding_placeholder_profile().await?;
+        let mut tx = self.pool.begin().await?;
+
+        for binding_id in binding_ids {
+            let historical_reference_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(1) FROM comparison_targets WHERE window_binding_id = ?",
+            )
+            .bind(&binding_id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            if historical_reference_count > 0 {
+                sqlx::query(
+                    r#"
+                    UPDATE window_bindings
+                    SET
+                      profile_id = ?,
+                      custom_provider_id = NULL,
+                      enabled = 0,
+                      metadata_json = '{"deleted":true}'
+                    WHERE id = ?
+                    "#,
+                )
+                .bind(&placeholder_profile_id)
+                .bind(&binding_id)
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                sqlx::query("DELETE FROM window_bindings WHERE id = ?")
+                    .bind(&binding_id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
 
         sqlx::query("DELETE FROM custom_providers WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+
+        if let Some(profile_id) = legacy_profile_id {
+            let remaining_binding_count = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(1) FROM window_bindings WHERE profile_id = ?",
+            )
+            .bind(&profile_id)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            if remaining_binding_count == 0 {
+                sqlx::query("DELETE FROM model_profiles WHERE id = ?")
+                    .bind(&profile_id)
+                    .execute(&mut *tx)
+                    .await?;
+            } else {
+                sqlx::query(
+                    r#"
+                    UPDATE model_profiles
+                    SET enabled = 0
+                    WHERE id = ?
+                    "#,
+                )
+                .bind(&profile_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        tx.commit().await?;
 
         let _ = self.secret_store.delete_secret(&provider.api_key_encrypted);
 
         Ok(())
+    }
+
+    async fn ensure_provider_binding_placeholder_profile(&self) -> Result<String, AppError> {
+        let now = Utc::now().to_rfc3339();
+        let profile_id = "__provider_binding_profile__".to_string();
+
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO model_profiles (
+              id, name, provider, execution_mode, model_name, base_url, api_key_encrypted, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&profile_id)
+        .bind("Provider Binding Placeholder")
+        .bind("openai-compatible")
+        .bind("claude_cli")
+        .bind("provider-binding-placeholder")
+        .bind("")
+        .bind("secret://profile/__provider_binding_profile__")
+        .bind(&now)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(profile_id)
     }
 }

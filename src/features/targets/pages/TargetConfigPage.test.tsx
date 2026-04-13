@@ -6,6 +6,7 @@ import { TargetConfigPage } from "./TargetConfigPage";
 const {
   createCustomProvider,
   createWindowBinding,
+  deleteCustomProvider,
   updateWindowBinding,
   deleteWindowBinding,
 } = vi.hoisted(() => {
@@ -31,6 +32,7 @@ const {
       last_seen_at: "2026-01-01T00:00:00Z",
       metadata_json: "{}",
     }),
+    deleteCustomProvider: vi.fn().mockResolvedValue(undefined),
     updateWindowBinding: vi.fn().mockResolvedValue({
       id: "binding-1",
       iterm_session_id: "session-1b",
@@ -75,6 +77,7 @@ vi.mock("../../../lib/tauri", () => {
       },
     ]),
     createWindowBinding,
+    deleteCustomProvider,
     updateWindowBinding,
     deleteWindowBinding,
     listWindowBindings: vi.fn().mockResolvedValue([
@@ -233,5 +236,21 @@ describe("TargetConfigPage", () => {
 
     await screen.findByText("已被运行任务引用，暂时不能删除");
     expect(deleteWindowBinding.mock.calls[0]?.[0]).toBe("binding-1");
+  });
+
+  it("deletes a provider after inline confirmation", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "删除 Provider GLM baseline" }));
+    expect(
+      await screen.findByRole("button", { name: "确认删除 Provider GLM baseline" }),
+    ).toBeInTheDocument();
+    expect(deleteCustomProvider).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "确认删除 Provider GLM baseline" }));
+
+    await waitFor(() => {
+      expect(deleteCustomProvider).toHaveBeenCalledWith("provider-1");
+    });
   });
 });

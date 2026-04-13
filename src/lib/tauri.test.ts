@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   exportComparisonRunReport,
+  deleteCustomProvider,
   deleteProfile,
   deleteWindowBinding,
   getProfileSecret,
@@ -78,6 +79,7 @@ describe("target config tauri bindings", () => {
     });
     await getProfileSecret("profile-1");
     await deleteProfile("profile-1");
+    await deleteCustomProvider("provider-1");
     await updateWindowBinding("binding-1", {
       display_name: "Window A",
       iterm_session_id: "session-1",
@@ -99,7 +101,8 @@ describe("target config tauri bindings", () => {
     });
     expect(invokeMock).toHaveBeenNthCalledWith(3, "get_profile_secret", { id: "profile-1" });
     expect(invokeMock).toHaveBeenNthCalledWith(4, "delete_profile", { id: "profile-1" });
-    expect(invokeMock).toHaveBeenNthCalledWith(5, "update_window_binding", {
+    expect(invokeMock).toHaveBeenNthCalledWith(5, "delete_custom_provider", { id: "provider-1" });
+    expect(invokeMock).toHaveBeenNthCalledWith(6, "update_window_binding", {
       id: "binding-1",
       input: {
         display_name: "Window A",
@@ -107,6 +110,6 @@ describe("target config tauri bindings", () => {
         profile_id: "profile-1",
       },
     });
-    expect(invokeMock).toHaveBeenNthCalledWith(6, "delete_window_binding", { id: "binding-1" });
+    expect(invokeMock).toHaveBeenNthCalledWith(7, "delete_window_binding", { id: "binding-1" });
   });
 });

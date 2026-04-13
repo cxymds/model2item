@@ -48,6 +48,10 @@ export function createCustomProvider(input: CreateCustomProviderInput) {
   return core.invoke<CustomProviderResponse>("create_custom_provider", { input });
 }
 
+export function deleteCustomProvider(id: string) {
+  return core.invoke<void>("delete_custom_provider", { id });
+}
+
 export function listWindowBindings() {
   return core.invoke<WindowBindingResponse[]>("list_window_bindings");
 }

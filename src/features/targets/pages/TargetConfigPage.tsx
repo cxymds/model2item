@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createCustomProvider,
   createWindowBinding,
+  deleteCustomProvider,
   deleteWindowBinding,
   listCustomProviders,
   listItermSessions,
@@ -12,6 +13,7 @@ import {
 import { formatDateTime } from "../../../lib/formatters";
 import { CustomProviderForm } from "../components/CustomProviderForm";
 import { WindowBindingList } from "../components/WindowBindingList";
+import { useState } from "react";
 
 function getErrorMessage(error: unknown) {
   const message = String(error);
@@ -20,6 +22,7 @@ function getErrorMessage(error: unknown) {
 
 export function TargetConfigPage() {
   const queryClient = useQueryClient();
+  const [pendingDeleteProviderId, setPendingDeleteProviderId] = useState<string | null>(null);
 
   const customProvidersQuery = useQuery({
     queryKey: ["custom-providers"],
@@ -70,6 +73,16 @@ export function TargetConfigPage() {
       await queryClient.invalidateQueries({ queryKey: ["window-bindings"] });
     },
   });
+  const deleteProviderMutation = useMutation({
+    mutationFn: (id: string) => deleteCustomProvider(id),
+    onSuccess: async () => {
+      setPendingDeleteProviderId(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["custom-providers"] }),
+        queryClient.invalidateQueries({ queryKey: ["window-bindings"] }),
+      ]);
+    },
+  });
 
   return (
     <section className="page stack-block">
@@ -113,9 +126,50 @@ export function TargetConfigPage() {
                   </span>
                   <span>{provider.base_url || "未设置 Base URL"}</span>
                   <span>更新时间：{formatDateTime(provider.updated_at)}</span>
+                  <div className="stack-inline">
+                    <button
+                      className="ghost-btn"
+                      disabled={deleteProviderMutation.isPending}
+                      onClick={() => {
+                        setPendingDeleteProviderId(provider.id);
+                      }}
+                      type="button"
+                    >
+                      删除 Provider {provider.name}
+                    </button>
+                    {pendingDeleteProviderId === provider.id ? (
+                      <>
+                        <button
+                          className="primary-btn"
+                          disabled={deleteProviderMutation.isPending}
+                          onClick={() => {
+                            deleteProviderMutation.mutate(provider.id);
+                          }}
+                          type="button"
+                        >
+                          确认删除 Provider {provider.name}
+                        </button>
+                        <button
+                          className="ghost-btn"
+                          disabled={deleteProviderMutation.isPending}
+                          onClick={() => {
+                            setPendingDeleteProviderId(null);
+                          }}
+                          type="button"
+                        >
+                          取消删除
+                        </button>
+                      </>
+                    ) : null}
+                  </div>
                 </li>
               ))}
             </ul>
+          ) : null}
+          {deleteProviderMutation.isError ? (
+            <p className="error-text">
+              删除 Provider 失败。{getErrorMessage(deleteProviderMutation.error)}
+            </p>
           ) : null}
         </div>
 
