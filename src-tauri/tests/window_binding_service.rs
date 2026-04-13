@@ -613,6 +613,74 @@ async fn allows_deleting_window_binding_when_only_finished_runs_reference_it(
 }
 
 #[tokio::test]
+async fn allows_deleting_closed_window_binding_after_reconciling_active_runs(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let profile_service =
+        ProfileService::with_secret_store(pool.clone(), Arc::new(MemorySecretStore::default()));
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Claude Sonnet".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-sonnet".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Legacy parser".to_string(),
+            prompt: "Explain parser".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-closed".to_string(),
+            display_name: "Window Closed".to_string(),
+            profile_id: profile.id.clone(),
+            custom_provider_id: None,
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Queued Benchmark".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    let result = binding_service
+        .delete_window_binding_after_reconciling_sessions(&binding.id, &[])
+        .await;
+
+    assert!(result.is_ok());
+
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "failed");
+
+    let targets = run_service.list_comparison_targets(&run.id).await?;
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].status, "failed");
+    assert_eq!(targets[0].error_category.as_deref(), Some("session_closed"));
+
+    let bindings = binding_service.list_window_bindings().await?;
+    assert!(bindings.is_empty());
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn applies_binding_to_window_session_and_writes_visible_notice(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
@@ -661,7 +729,7 @@ async fn applies_binding_to_window_session_and_writes_visible_notice(
 }
 
 #[tokio::test]
-async fn applies_openai_compatible_claude_cli_binding_with_profile_specific_env(
+async fn applies_openai_compatible_claude_cli_binding_without_exporting_provider_env(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
     let secret_store = Arc::new(MemorySecretStore::default());
@@ -695,12 +763,13 @@ async fn applies_openai_compatible_claude_cli_binding_with_profile_specific_env(
 
     let texts = adapter.texts.lock().expect("texts mutex");
     assert_eq!(texts.len(), 1);
-    assert!(texts[0].1.contains("export OPENAI_API_KEY='glm-secret'"));
-    assert!(texts[0]
+    assert!(!texts[0].1.contains("export OPENAI_API_KEY='glm-secret'"));
+    assert!(!texts[0]
         .1
         .contains("export OPENAI_BASE_URL='https://gateway.example.com/v1'"));
-    assert!(texts[0].1.contains("export OPENAI_MODEL='glm-4.5'"));
+    assert!(!texts[0].1.contains("export OPENAI_MODEL='glm-4.5'"));
     assert!(!texts[0].1.contains("export ANTHROPIC_API_KEY"));
+    assert!(texts[0].1.contains("via Provider API"));
 
     Ok(())
 }
@@ -755,12 +824,13 @@ async fn applies_binding_using_custom_provider_values_when_present(
 
     let texts = adapter.texts.lock().expect("texts mutex");
     assert_eq!(texts.len(), 1);
-    assert!(texts[0].1.contains("export OPENAI_API_KEY='provider-secret'"));
-    assert!(texts[0]
+    assert!(!texts[0].1.contains("export OPENAI_API_KEY='provider-secret'"));
+    assert!(!texts[0]
         .1
         .contains("export OPENAI_BASE_URL='https://glm.example.com/v1'"));
-    assert!(texts[0].1.contains("export OPENAI_MODEL='glm-5.1'"));
+    assert!(!texts[0].1.contains("export OPENAI_MODEL='glm-5.1'"));
     assert!(!texts[0].1.contains("claude-sonnet-4"));
+    assert!(texts[0].1.contains("via Provider API"));
 
     Ok(())
 }

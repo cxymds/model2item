@@ -65,9 +65,20 @@ pub async fn update_window_binding(
 
 #[tauri::command]
 pub async fn delete_window_binding(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let session_service = ItermSessionService::new();
+    let sessions = session_service
+        .list_sessions()
+        .await
+        .map_err(|error| error.to_string())?;
     let service = WindowBindingService::new(state.pool.clone());
     service
-        .delete_window_binding(&id)
+        .delete_window_binding_after_reconciling_sessions(
+            &id,
+            &sessions
+                .iter()
+                .map(|session| session.session_id.clone())
+                .collect::<Vec<_>>(),
+        )
         .await
         .map_err(|error| error.to_string())
 }

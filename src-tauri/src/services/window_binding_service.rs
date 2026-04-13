@@ -7,6 +7,7 @@ use crate::{
     models::window_binding::{
         CreateWindowBindingInput, UpdateWindowBindingInput, WindowBindingRecord,
     },
+    services::comparison_run_service::ComparisonRunService,
 };
 
 #[derive(Clone)]
@@ -217,6 +218,17 @@ impl WindowBindingService {
         }
 
         Ok(())
+    }
+
+    pub async fn delete_window_binding_after_reconciling_sessions(
+        &self,
+        id: &str,
+        online_session_ids: &[String],
+    ) -> Result<(), AppError> {
+        ComparisonRunService::new(self.pool.clone())
+            .reconcile_closed_sessions(online_session_ids)
+            .await?;
+        self.delete_window_binding(id).await
     }
 
     pub async fn sync_with_online_sessions(
