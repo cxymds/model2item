@@ -1490,6 +1490,85 @@ async fn startup_validation_skips_claude_launch_command_for_openai_chat(
 }
 
 #[tokio::test]
+async fn startup_validation_skips_claude_launch_command_for_provider_backed_claude_cli(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = OpenaiOnlyAdapter::default();
+    let openai_executor = Arc::new(FakeOpenaiExecutor::default());
+    let orchestrator = ComparisonOrchestrator::with_dependencies_and_openai_executor(
+        pool.clone(),
+        secret_store.clone(),
+        adapter,
+        openai_executor,
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Legacy Claude Profile".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-sonnet-4".to_string(),
+            base_url: "https://api.anthropic.com".to_string(),
+            api_key: "profile-secret".to_string(),
+        })
+        .await?;
+
+    insert_custom_provider(
+        &pool,
+        "provider-startup-glm",
+        "GLM via Claude CLI",
+        "glm",
+        "claude_cli",
+        "https://glm.example.com/v1",
+        "secret://provider/startup-glm",
+        "glm-5.1",
+    )
+    .await?;
+    secret_store.set_secret("secret://provider/startup-glm", "provider-secret")?;
+
+    sqlx::query("UPDATE custom_providers SET extra_params_json = '{\"cwd\":123}' WHERE id = ?")
+        .bind("provider-startup-glm")
+        .execute(&pool)
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Provider-backed Claude startup".to_string(),
+            prompt: "Validate provider-backed startup".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-openai".to_string(),
+            display_name: "Window Provider-backed Claude".to_string(),
+            profile_id: profile.id,
+            custom_provider_id: Some("provider-startup-glm".to_string()),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Provider-backed Claude startup validation".to_string(),
+            target_ids: vec![binding.id],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.validate_run_startup(&run.id).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn broadcasts_follow_up_for_openai_chat_without_terminal_io(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
@@ -1586,6 +1665,97 @@ async fn broadcasts_follow_up_for_openai_chat_without_terminal_io(
     let combined_messages = stored_messages.join("\n---\n");
     assert!(combined_messages.contains("Continue with parser edge cases"));
     assert!(combined_messages.contains("OpenAI follow-up result"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn execute_run_uses_provider_executor_for_provider_backed_claude_cli(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = OpenaiOnlyAdapter::default();
+    let openai_executor = Arc::new(FakeOpenaiExecutor::default());
+    let orchestrator = ComparisonOrchestrator::with_dependencies_and_openai_executor(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+        openai_executor.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "Legacy Claude Profile".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-sonnet-4".to_string(),
+            base_url: "https://api.anthropic.com".to_string(),
+            api_key: "profile-secret".to_string(),
+        })
+        .await?;
+
+    insert_custom_provider(
+        &pool,
+        "provider-execute-glm",
+        "GLM via Claude CLI",
+        "glm",
+        "claude_cli",
+        "https://glm.example.com/v1",
+        "secret://provider/execute-glm",
+        "glm-5.1",
+    )
+    .await?;
+    secret_store.set_secret("secret://provider/execute-glm", "provider-secret")?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Provider-backed Claude execute".to_string(),
+            prompt: "Say hello".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-openai".to_string(),
+            display_name: "Window Provider-backed Claude".to_string(),
+            profile_id: profile.id,
+            custom_provider_id: Some("provider-execute-glm".to_string()),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "Provider-backed Claude run".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.execute_run(&run.id).await?;
+
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "done");
+
+    assert!(adapter
+        .sent_texts
+        .lock()
+        .expect("sent_texts mutex")
+        .is_empty());
+
+    let requests = openai_executor.requests.lock().expect("requests mutex");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].execution_mode, "claude_cli");
+    assert_eq!(requests[0].provider, "glm");
+    assert_eq!(requests[0].model_name, "glm-5.1");
+    assert_eq!(requests[0].base_url, "https://glm.example.com/v1");
+    assert_eq!(requests[0].api_key, "provider-secret");
 
     Ok(())
 }

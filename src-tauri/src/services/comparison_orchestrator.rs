@@ -9,8 +9,8 @@ use crate::{
     services::{
         comparison_run_service::{ComparisonRunService, ComparisonTargetExecutionRecord},
         iterm_mcp_adapter::{
-            build_claude_cli_launch_command, classify_adapter_error, ItermExecutionRequest,
-            ItermMcpAdapter, PythonItermMcpAdapter,
+            build_claude_cli_launch_command, classify_adapter_error, provider_uses_terminal_session,
+            ItermExecutionRequest, ItermMcpAdapter, PythonItermMcpAdapter,
         },
         openai_chat_executor::OpenaiChatExecutor,
         secret_store::{SecretStore, SystemSecretStore},
@@ -59,8 +59,14 @@ impl ComparisonOrchestrator<PythonItermMcpAdapter> {
 }
 
 impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
+    fn uses_provider_executor(provider: &str, execution_mode: &str) -> bool {
+        execution_mode == "openai_chat"
+            || (execution_mode == "claude_cli"
+                && !provider_uses_terminal_session(provider, execution_mode))
+    }
+
     fn requires_online_session(target: &ComparisonTargetExecutionRecord) -> bool {
-        target.execution_mode == "claude_cli"
+        provider_uses_terminal_session(&target.provider, &target.execution_mode)
     }
 
     fn map_secret_lookup_error(
@@ -223,6 +229,8 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                 .map_err(|error| {
                     Self::map_secret_lookup_error(&target.display_name, &target.profile_name, error)
                 })?;
+            let uses_terminal_session =
+                provider_uses_terminal_session(&target.provider, &target.execution_mode);
             let request = ItermExecutionRequest {
                 request_id: target.target_id,
                 session_id: target.iterm_session_id,
@@ -236,7 +244,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                 extra_params_json: target.extra_params_json,
             };
 
-            if target.execution_mode == "claude_cli" {
+            if uses_terminal_session {
                 build_claude_cli_launch_command(&request).map_err(AppError::Adapter)?;
             }
         }
@@ -350,7 +358,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             .store_target_message(&target.target_id, "user", &prompt, "follow_up")
             .await?;
 
-        if target.execution_mode == "openai_chat" {
+        if Self::uses_provider_executor(&target.provider, &target.execution_mode) {
             let api_key = self
                 .secret_store
                 .get_secret(&target.api_key_locator)
@@ -496,7 +504,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             extra_params_json: target.extra_params_json.clone(),
         };
 
-        if target.execution_mode == "openai_chat" {
+        if Self::uses_provider_executor(&target.provider, &target.execution_mode) {
             match self.openai_executor.execute_chat_completion(&request).await {
                 Ok(output_text) => {
                     self.run_service

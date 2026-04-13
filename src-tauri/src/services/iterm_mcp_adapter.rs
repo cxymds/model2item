@@ -262,14 +262,16 @@ pub fn build_binding_sync_command(
     api_key: &str,
 ) -> String {
     let mut commands = Vec::new();
-    for (key, value) in provider_env_vars(provider, api_key, base_url, model_name) {
-        commands.push(format!("export {key}={}", shell_escape(&value)));
+    if provider_uses_terminal_session(provider, execution_mode) {
+        for (key, value) in provider_env_vars(provider, api_key, base_url, model_name) {
+            commands.push(format!("export {key}={}", shell_escape(&value)));
+        }
     }
     commands.push(format!(
         "printf '%s\\n' {}",
         shell_escape(&format!(
             "[iterm-mcp-tools] Bound profile '{profile_name}' ({provider}/{model_name}) to this window. Next run will use {model_name} via {}.",
-            execution_mode_label(execution_mode)
+            execution_mode_label(execution_mode, provider)
         ))
     ));
 
@@ -318,11 +320,23 @@ pub fn build_claude_cli_launch_command(request: &ItermExecutionRequest) -> Resul
     Ok(format!("{}\n", commands.join(" && ")))
 }
 
-fn execution_mode_label(execution_mode: &str) -> &'static str {
-    match execution_mode {
-        "openai_chat" => "OpenAI Chat API",
-        _ => "Claude Code",
+fn execution_mode_label(execution_mode: &str, provider: &str) -> &'static str {
+    if execution_mode == "openai_chat" || !provider_uses_terminal_session(provider, execution_mode) {
+        "Provider API"
+    } else {
+        "Claude Code"
     }
+}
+
+pub fn provider_uses_terminal_session(provider: &str, execution_mode: &str) -> bool {
+    if execution_mode != "claude_cli" {
+        return false;
+    }
+
+    matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "" | "anthropic" | "claude"
+    )
 }
 
 fn provider_env_vars(
@@ -589,12 +603,12 @@ mod tests {
             "secret",
         );
 
-        assert!(command.contains("via OpenAI Chat API"));
+        assert!(command.contains("via Provider API"));
         assert!(!command.contains("via Claude Code"));
     }
 
     #[test]
-    fn binding_sync_command_uses_openai_env_for_openai_compatible_claude_cli() {
+    fn binding_sync_command_avoids_exporting_env_for_provider_backed_claude_cli() {
         let command = build_binding_sync_command(
             "GLM Profile",
             "openai-compatible",
@@ -604,10 +618,11 @@ mod tests {
             "glm-secret",
         );
 
-        assert!(command.contains("export OPENAI_API_KEY='glm-secret'"));
-        assert!(command.contains("export OPENAI_BASE_URL='https://gateway.example.com/v1'"));
-        assert!(command.contains("export OPENAI_MODEL='glm-4.5'"));
+        assert!(!command.contains("export OPENAI_API_KEY='glm-secret'"));
+        assert!(!command.contains("export OPENAI_BASE_URL='https://gateway.example.com/v1'"));
+        assert!(!command.contains("export OPENAI_MODEL='glm-4.5'"));
         assert!(!command.contains("export ANTHROPIC_API_KEY"));
+        assert!(command.contains("via Provider API"));
     }
 
     #[test]
