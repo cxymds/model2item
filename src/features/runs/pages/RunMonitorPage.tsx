@@ -6,11 +6,16 @@ import {
   sendComparisonRunMessage,
   startComparisonRun,
 } from "../../../lib/tauri";
-import { saveRecentRun } from "../lib/recentRun";
+import { clearRecentRun, saveRecentRun } from "../lib/recentRun";
 import { RunTargetStatusCard } from "../components/RunTargetStatusCard";
 import { comparisonRunQuery, comparisonTargetsQuery } from "../lib/runQueries";
 import { buildRunTargetViewModels } from "../lib/runViewModel";
 import type { ComparisonMessageResponse } from "../../../types/api";
+
+function getErrorMessage(error: unknown) {
+  const message = String(error);
+  return message.startsWith("Error: ") ? message.slice(7) : message;
+}
 
 function buildTargetPreview(content: string | null) {
   const normalized = (content ?? "").trim();
@@ -196,6 +201,15 @@ export function RunMonitorPage() {
     });
   }, [runQuery.data]);
 
+  useEffect(() => {
+    if (!runQuery.isError) return;
+
+    const message = getErrorMessage(runQuery.error);
+    if (message.includes("comparison run") && message.includes("not found")) {
+      clearRecentRun();
+    }
+  }, [runQuery.error, runQuery.isError]);
+
   return (
     <section className="page stack-block">
       <header className="section-header">
@@ -220,15 +234,17 @@ export function RunMonitorPage() {
       </header>
 
       {runQuery.isLoading || targetsQuery.isLoading ? <p className="muted">正在加载运行状态...</p> : null}
-      {runQuery.isError ? <p className="error-text">加载运行任务失败。{String(runQuery.error)}</p> : null}
+      {runQuery.isError ? (
+        <p className="error-text">加载运行任务失败。{getErrorMessage(runQuery.error)}</p>
+      ) : null}
       {targetsQuery.isError ? (
-        <p className="error-text">加载目标失败。{String(targetsQuery.error)}</p>
+        <p className="error-text">加载目标失败。{getErrorMessage(targetsQuery.error)}</p>
       ) : null}
       {startRunMutation.isError ? (
-        <p className="error-text">启动执行失败。{String(startRunMutation.error)}</p>
+        <p className="error-text">启动执行失败。{getErrorMessage(startRunMutation.error)}</p>
       ) : null}
       {sendPromptMutation.isError ? (
-        <p className="error-text">发送后续提示词失败。{String(sendPromptMutation.error)}</p>
+        <p className="error-text">发送后续提示词失败。{getErrorMessage(sendPromptMutation.error)}</p>
       ) : null}
 
       {runQuery.data?.status === "running" ? (

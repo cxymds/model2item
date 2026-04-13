@@ -118,6 +118,19 @@ async fn rejects_comparison_run_when_binding_does_not_exist(
 }
 
 #[tokio::test]
+async fn get_comparison_run_returns_not_found_for_missing_run(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let run_service = ComparisonRunService::new(pool);
+
+    let result = run_service.get_comparison_run("missing-run").await;
+
+    assert!(matches!(result, Err(AppError::MissingDependency(message)) if message.contains("comparison run missing-run not found")));
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn rejects_comparison_run_with_empty_target_ids() -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
     let case_service = EvaluationCaseService::new(pool.clone());

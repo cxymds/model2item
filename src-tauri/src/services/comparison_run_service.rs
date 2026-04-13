@@ -219,9 +219,9 @@ impl ComparisonRunService {
             "SELECT * FROM comparison_runs WHERE id = ? LIMIT 1",
         )
         .bind(run_id)
-        .fetch_one(&self.pool)
+        .fetch_optional(&self.pool)
         .await?;
-        Ok(row)
+        row.ok_or_else(|| AppError::MissingDependency(format!("comparison run {run_id} not found")))
     }
 
     pub async fn list_comparison_runs(

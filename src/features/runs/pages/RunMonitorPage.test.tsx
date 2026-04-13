@@ -300,4 +300,41 @@ describe("RunMonitorPage", () => {
     expect(await screen.findByText("失败原因")).toBeInTheDocument();
     expect(screen.getAllByText("spawned CLI exited immediately: missing auth token").length).toBeGreaterThan(0);
   });
+
+  it("clears the recent run cache when the requested run no longer exists", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    window.localStorage.setItem(
+      "recent-comparison-run",
+      JSON.stringify({
+        id: "run-1",
+        title: "Stale run",
+        status: "running",
+      }),
+    );
+    getComparisonRunMock.mockRejectedValueOnce(
+      new Error("missing dependency: comparison run run-1 not found"),
+    );
+    listComparisonTargetsMock.mockResolvedValueOnce([]);
+
+    render(
+      <MemoryRouter initialEntries={["/runs/run-1"]}>
+        <QueryClientProvider client={queryClient}>
+          <Routes>
+            <Route path="/runs/:runId" element={<RunMonitorPage />} />
+          </Routes>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText("加载运行任务失败。missing dependency: comparison run run-1 not found"),
+    ).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem("recent-comparison-run")).toBeNull();
+    });
+  });
 });

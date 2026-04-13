@@ -45,6 +45,13 @@ export function saveRecentRun(run: RecentRunRecord) {
   window.dispatchEvent(new Event(RECENT_RUN_EVENT));
 }
 
+export function clearRecentRun() {
+  if (typeof window === "undefined") return;
+
+  window.localStorage.removeItem(RECENT_RUN_STORAGE_KEY);
+  window.dispatchEvent(new Event(RECENT_RUN_EVENT));
+}
+
 export function useRecentRun() {
   const [recentRun, setRecentRun] = useState<RecentRunRecord | null>(() => loadRecentRun());
 
