@@ -338,6 +338,7 @@ impl ItermMcpAdapter for ConcurrentBroadcastAdapter {
 struct FakeOpenaiExecutor {
     requests: Arc<Mutex<Vec<ItermExecutionRequest>>>,
     response_text: Arc<Mutex<String>>,
+    failure_text: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for FakeOpenaiExecutor {
@@ -345,6 +346,7 @@ impl Default for FakeOpenaiExecutor {
         Self {
             requests: Arc::new(Mutex::new(Vec::new())),
             response_text: Arc::new(Mutex::new("OpenAI direct result".to_string())),
+            failure_text: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -359,6 +361,14 @@ impl OpenaiChatCompletionExecutor for FakeOpenaiExecutor {
             .lock()
             .expect("requests mutex")
             .push(request.clone());
+        if let Some(error) = self
+            .failure_text
+            .lock()
+            .expect("failure_text mutex")
+            .clone()
+        {
+            return Err(error);
+        }
         Ok(self
             .response_text
             .lock()
@@ -1665,6 +1675,102 @@ async fn broadcasts_follow_up_for_openai_chat_without_terminal_io(
     let combined_messages = stored_messages.join("\n---\n");
     assert!(combined_messages.contains("Continue with parser edge cases"));
     assert!(combined_messages.contains("OpenAI follow-up result"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn finalizes_run_when_openai_follow_up_broadcast_fails(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = OpenaiOnlyAdapter::default();
+    let openai_executor = Arc::new(FakeOpenaiExecutor::default());
+    *openai_executor
+        .failure_text
+        .lock()
+        .expect("failure_text mutex") = Some(
+        "OpenAI chat completion request failed with status 503 Service Unavailable".to_string(),
+    );
+    let orchestrator = ComparisonOrchestrator::with_dependencies_and_openai_executor(
+        pool.clone(),
+        secret_store.clone(),
+        adapter,
+        openai_executor,
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GLM 5.1".to_string(),
+            provider: "openai-compatible".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "glm-5.1".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "OpenAI failed follow-up case".to_string(),
+            prompt: "Initial prompt".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-openai".to_string(),
+            display_name: "Window OpenAI".to_string(),
+            profile_id: profile.id.clone(),
+            custom_provider_id: None,
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "OpenAI failed follow-up run".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    let target = run_service
+        .list_comparison_targets(&run.id)
+        .await?
+        .into_iter()
+        .find(|target| target.window_binding_id == binding.id)
+        .expect("target should exist");
+
+    run_service.mark_run_started(&run.id).await?;
+    run_service.mark_target_running(&target.id).await?;
+
+    let result = orchestrator
+        .broadcast_message(&run.id, "Continue with parser edge cases")
+        .await;
+
+    assert!(matches!(result, Err(AppError::Adapter(_))));
+
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "failed");
+
+    let updated_target = run_service
+        .list_comparison_targets(&run.id)
+        .await?
+        .into_iter()
+        .find(|record| record.id == target.id)
+        .expect("updated target should exist");
+    assert_eq!(updated_target.status, "failed");
+    assert_eq!(
+        updated_target.error_category.as_deref(),
+        Some("execution_error")
+    );
 
     Ok(())
 }

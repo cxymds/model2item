@@ -342,6 +342,8 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             }
         }
 
+        self.run_service.finalize_run_if_terminal(run_id).await?;
+
         if let Some(error) = first_error {
             Err(error)
         } else {
