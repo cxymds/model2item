@@ -20,6 +20,7 @@ struct BindingSyncRecord {
     iterm_session_id: String,
     profile_name: String,
     provider: String,
+    execution_mode: String,
     model_name: String,
     base_url: String,
     api_key_locator: String,
@@ -62,6 +63,7 @@ impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
               wb.iterm_session_id AS iterm_session_id,
               mp.name AS profile_name,
               mp.provider AS provider,
+              mp.execution_mode AS execution_mode,
               mp.model_name AS model_name,
               mp.base_url AS base_url,
               mp.api_key_encrypted AS api_key_locator
@@ -83,6 +85,7 @@ impl<A: ItermMcpAdapter> WindowBindingSyncService<A> {
             &record.profile_name,
             &record.provider,
             &record.model_name,
+            &record.execution_mode,
             &record.base_url,
             &api_key,
         );

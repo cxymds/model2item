@@ -1,10 +1,12 @@
 import { formatDurationMs, parseJsonSafe, shortenId } from "../../../lib/formatters";
+import { getExecutionModeLabel, normalizeExecutionMode } from "../../../types/api";
 import type { ComparisonSummaryTargetResponse, ComparisonTargetResponse } from "../../../types/api";
 import type { MetricRow } from "../components/MetricTable";
 import type { ResultComparisonColumn } from "../components/ResultComparisonGrid";
 import type { RunTargetStatus } from "../components/RunTargetStatusCard";
 
 type ProfileSnapshot = {
+  execution_mode?: string;
   provider: string;
   model_name: string;
 };
@@ -47,6 +49,9 @@ function buildRunTargetLabel(target: ComparisonTargetResponse): string {
   const parsed = parseJsonSafe<unknown>(target.profile_snapshot_json);
   if (!isProfileSnapshot(parsed)) return `目标 ${shortenId(target.id)}`;
   const snapshot = parsed;
+  if (typeof snapshot.execution_mode === "string" && snapshot.execution_mode.length > 0) {
+    return `${getExecutionModeLabel(normalizeExecutionMode(snapshot.execution_mode))} / ${snapshot.model_name}`;
+  }
   return `${snapshot.provider} / ${snapshot.model_name}`;
 }
 

@@ -10,7 +10,7 @@ describe("runViewModel", () => {
       run_id: "run-1",
       window_binding_id: "binding-1",
       profile_snapshot_json:
-        '{"profile_id":"profile-1","provider":"openai","model_name":"gpt-5.4","base_url":"https://api.example.com/v1"}',
+        '{"profile_id":"profile-1","execution_mode":"openai_chat","provider":"openai","model_name":"gpt-5.4","base_url":"https://api.example.com/v1"}',
       status: "queued",
       sent_at: null,
       first_response_at: null,
@@ -26,7 +26,7 @@ describe("runViewModel", () => {
     };
 
     const vm = buildRunTargetViewModel(target);
-    expect(vm.label).toBe("openai / gpt-5.4");
+    expect(vm.label).toBe("OpenAI Chat / gpt-5.4");
     expect(vm.summary).toContain("状态：排队中");
     expect(vm.status).toBe("queued");
   });

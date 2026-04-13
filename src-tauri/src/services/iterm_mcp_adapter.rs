@@ -21,6 +21,7 @@ pub struct ItermExecutionRequest {
     pub request_id: String,
     pub session_id: String,
     pub prompt: String,
+    pub execution_mode: String,
     pub provider: String,
     pub model_name: String,
     pub base_url: String,
@@ -158,7 +159,7 @@ impl ItermMcpAdapter for PythonItermMcpAdapter {
         &self,
         request: ItermExecutionRequest,
     ) -> Result<ItermExecutionResult, String> {
-        let built_command = build_claude_command(&request)?;
+        let built_command = build_claude_cli_command(&request)?;
         self.send_text(&request.session_id, &built_command.command_text)
             .await?;
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
@@ -184,7 +185,7 @@ impl ItermMcpAdapter for PythonItermMcpAdapter {
     }
 }
 
-fn build_claude_command(request: &ItermExecutionRequest) -> Result<BuiltCommand, String> {
+fn build_claude_cli_command(request: &ItermExecutionRequest) -> Result<BuiltCommand, String> {
     let extras = parse_claude_cli_extras(&request.extra_params_json)?;
     let execution_root = "/tmp/iterm-mcp-tools";
     let sanitized_request_id = sanitize_shell_token(&request.request_id);
@@ -261,6 +262,7 @@ pub fn build_binding_sync_command(
     profile_name: &str,
     provider: &str,
     model_name: &str,
+    execution_mode: &str,
     base_url: &str,
     api_key: &str,
 ) -> String {
@@ -290,16 +292,15 @@ pub fn build_binding_sync_command(
     commands.push(format!(
         "printf '%s\\n' {}",
         shell_escape(&format!(
-            "[iterm-mcp-tools] Bound profile '{profile_name}' ({provider}/{model_name}) to this window. Next run will use {model_name} via Claude Code."
+            "[iterm-mcp-tools] Bound profile '{profile_name}' ({provider}/{model_name}) to this window. Next run will use {model_name} via {}.",
+            execution_mode_label(execution_mode)
         ))
     ));
 
     format!("{}\n", commands.join(" && "))
 }
 
-pub fn build_interactive_claude_launch_command(
-    request: &ItermExecutionRequest,
-) -> Result<String, String> {
+pub fn build_claude_cli_launch_command(request: &ItermExecutionRequest) -> Result<String, String> {
     let extras = parse_claude_cli_extras(&request.extra_params_json)?;
     let mut commands = Vec::new();
 
@@ -353,6 +354,13 @@ pub fn build_interactive_claude_launch_command(
     commands.push(invocation_parts.join(" "));
 
     Ok(format!("{}\n", commands.join(" && ")))
+}
+
+fn execution_mode_label(execution_mode: &str) -> &'static str {
+    match execution_mode {
+        "openai_chat" => "OpenAI Chat API",
+        _ => "Claude Code",
+    }
 }
 
 fn parse_claude_cli_extras(raw: &str) -> Result<ClaudeCliExtras, String> {
@@ -433,7 +441,10 @@ impl PythonItermMcpAdapter {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_claude_command, ItermExecutionRequest};
+    use super::{
+        build_binding_sync_command, build_claude_cli_command, build_claude_cli_launch_command,
+        ItermExecutionRequest,
+    };
 
     #[test]
     fn builds_claude_shell_command_with_env_and_args() {
@@ -441,6 +452,7 @@ mod tests {
             request_id: "target-1".to_string(),
             session_id: "session-1".to_string(),
             prompt: "Summarize this codebase".to_string(),
+            execution_mode: "claude_cli".to_string(),
             provider: "anthropic".to_string(),
             model_name: "claude-sonnet-4-20250514".to_string(),
             base_url: "https://litellm.example.com".to_string(),
@@ -449,7 +461,7 @@ mod tests {
             extra_params_json: "{}".to_string(),
         };
 
-        let command = build_claude_command(&request).expect("command should build");
+        let command = build_claude_cli_command(&request).expect("command should build");
         assert!(
             command
                 .command_text
@@ -486,6 +498,7 @@ mod tests {
             request_id: "target:2".to_string(),
             session_id: "session-2".to_string(),
             prompt: "Inspect the service object".to_string(),
+            execution_mode: "claude_cli".to_string(),
             provider: "openai-compatible".to_string(),
             model_name: "gpt-4.1".to_string(),
             base_url: "https://gateway.example.com".to_string(),
@@ -500,7 +513,7 @@ mod tests {
             .to_string(),
         };
 
-        let command = build_claude_command(&request).expect("command should build");
+        let command = build_claude_cli_command(&request).expect("command should build");
 
         assert!(command.command_text.contains("cd '/tmp/project'"));
         assert!(command
@@ -520,6 +533,7 @@ mod tests {
             request_id: "target-3".to_string(),
             session_id: "session-3".to_string(),
             prompt: "Hello".to_string(),
+            execution_mode: "claude_cli".to_string(),
             provider: "anthropic".to_string(),
             model_name: "claude".to_string(),
             base_url: "https://api.example.com".to_string(),
@@ -528,7 +542,7 @@ mod tests {
             extra_params_json: "{not-json}".to_string(),
         };
 
-        let error = build_claude_command(&request).expect_err("command should fail");
+        let error = build_claude_cli_command(&request).expect_err("command should fail");
         assert!(error.contains("invalid extra_params_json"));
     }
 
@@ -538,6 +552,7 @@ mod tests {
             request_id: "target-4".to_string(),
             session_id: "session-4".to_string(),
             prompt: "Plain prompt".to_string(),
+            execution_mode: "claude_cli".to_string(),
             provider: "anthropic".to_string(),
             model_name: "claude".to_string(),
             base_url: "https://api.example.com".to_string(),
@@ -546,8 +561,62 @@ mod tests {
             extra_params_json: "{}".to_string(),
         };
 
-        let command = build_claude_command(&request).expect("command should build");
+        let command = build_claude_cli_command(&request).expect("command should build");
         assert!(!command.command_text.contains("## System Instructions"));
         assert!(command.command_text.contains("-p 'Plain prompt'"));
+    }
+
+    #[test]
+    fn binding_sync_command_uses_claude_label_for_claude_cli_mode() {
+        let command = build_binding_sync_command(
+            "Claude Profile",
+            "anthropic",
+            "claude-sonnet-4",
+            "claude_cli",
+            "https://api.anthropic.com",
+            "secret",
+        );
+
+        assert!(command.contains("via Claude Code"));
+    }
+
+    #[test]
+    fn binding_sync_command_uses_openai_label_for_openai_mode() {
+        let command = build_binding_sync_command(
+            "OpenAI Profile",
+            "openai",
+            "gpt-4.1",
+            "openai_chat",
+            "https://api.openai.com/v1",
+            "secret",
+        );
+
+        assert!(command.contains("via OpenAI Chat API"));
+        assert!(!command.contains("via Claude Code"));
+    }
+
+    #[test]
+    fn launch_command_builder_keeps_claude_cli_invocation_shape() {
+        let request = ItermExecutionRequest {
+            request_id: "launch-1".to_string(),
+            session_id: "session-launch".to_string(),
+            prompt: "Ignored for interactive launch".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            provider: "anthropic".to_string(),
+            model_name: "claude-sonnet-4".to_string(),
+            base_url: "https://api.anthropic.com".to_string(),
+            api_key: "launch-secret".to_string(),
+            system_prompt: String::new(),
+            extra_params_json: r#"{
+              "claudeExecutable":"claude-dev",
+              "args":["--dangerously-skip-permissions"]
+            }"#
+            .to_string(),
+        };
+
+        let command = build_claude_cli_launch_command(&request).expect("command should build");
+        assert!(command.contains("Starting interactive Claude session for launch-1"));
+        assert!(command
+            .contains("'claude-dev' --model 'claude-sonnet-4' '--dangerously-skip-permissions'"));
     }
 }

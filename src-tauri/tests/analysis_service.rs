@@ -59,7 +59,7 @@ fn computes_fastest_and_longest_targets() {
             120,
             8,
             None,
-            r#"{"display_name":"Window A","provider":"openai","model_name":"gpt-5.4"}"#,
+            r#"{"display_name":"Window A","execution_mode":"openai_chat","provider":"openai","model_name":"gpt-5.4"}"#,
         ),
         target(
             "target-b",
@@ -68,7 +68,7 @@ fn computes_fastest_and_longest_targets() {
             240,
             16,
             Some("success"),
-            r#"{"display_name":"Window B","provider":"anthropic","model_name":"claude-sonnet"}"#,
+            r#"{"display_name":"Window B","execution_mode":"claude_cli","provider":"anthropic","model_name":"claude-sonnet"}"#,
         ),
     ];
 
@@ -76,6 +76,8 @@ fn computes_fastest_and_longest_targets() {
     assert_eq!(summary.fastest_target_id.as_deref(), Some("target-b"));
     assert_eq!(summary.longest_target_id.as_deref(), Some("target-b"));
     assert!(summary.summary_text.contains("fastest"));
+    assert_eq!(summary.targets[0].label, "OpenAI Chat / gpt-5.4");
+    assert_eq!(summary.targets[1].label, "Claude CLI / claude-sonnet");
 }
 
 #[test]

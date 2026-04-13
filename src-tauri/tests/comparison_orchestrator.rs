@@ -13,7 +13,7 @@ use iterm_mcp_tools_lib::{
         profile::CreateProfileInput, window_binding::CreateWindowBindingInput,
     },
     services::{
-        comparison_orchestrator::ComparisonOrchestrator,
+        comparison_orchestrator::{ComparisonOrchestrator, OpenaiChatCompletionExecutor},
         comparison_run_service::ComparisonRunService,
         evaluation_case_service::EvaluationCaseService,
         iterm_mcp_adapter::{
@@ -120,6 +120,81 @@ struct DelayedOutputAdapter {
     screen_reads: Arc<Mutex<HashMap<String, usize>>>,
 }
 
+#[derive(Clone, Default)]
+struct OpenaiOnlyAdapter {
+    sent_texts: Arc<Mutex<Vec<(String, String)>>>,
+    screen_reads: Arc<Mutex<HashMap<String, usize>>>,
+}
+
+#[async_trait]
+impl ItermMcpAdapter for OpenaiOnlyAdapter {
+    async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
+        Ok(vec![ItermSessionInfo {
+            session_id: "session-openai".to_string(),
+            window_id: "window-openai".to_string(),
+            window_title: "Window OpenAI".to_string(),
+            tab_id: "tab-openai".to_string(),
+            tab_title: "Tab OpenAI".to_string(),
+            session_title: "Pane OpenAI".to_string(),
+        }])
+    }
+
+    async fn send_text(&self, session_id: &str, text: &str) -> Result<(), String> {
+        self.sent_texts
+            .lock()
+            .expect("sent_texts mutex")
+            .push((session_id.to_string(), text.to_string()));
+        Ok(())
+    }
+
+    async fn get_screen_text(&self, session_id: &str) -> Result<String, String> {
+        let mut screen_reads = self.screen_reads.lock().expect("screen_reads mutex");
+        let current = screen_reads.entry(session_id.to_string()).or_insert(0);
+        *current += 1;
+        Ok(format!("unexpected screen read {}", current))
+    }
+
+    async fn execute_prompt(
+        &self,
+        _request: ItermExecutionRequest,
+    ) -> Result<ItermExecutionResult, String> {
+        Err("adapter execute_prompt should not be used for openai_chat".to_string())
+    }
+}
+
+#[derive(Clone)]
+struct FakeOpenaiExecutor {
+    requests: Arc<Mutex<Vec<ItermExecutionRequest>>>,
+    response_text: Arc<Mutex<String>>,
+}
+
+impl Default for FakeOpenaiExecutor {
+    fn default() -> Self {
+        Self {
+            requests: Arc::new(Mutex::new(Vec::new())),
+            response_text: Arc::new(Mutex::new("OpenAI direct result".to_string())),
+        }
+    }
+}
+
+#[async_trait]
+impl OpenaiChatCompletionExecutor for FakeOpenaiExecutor {
+    async fn execute_chat_completion(
+        &self,
+        request: &ItermExecutionRequest,
+    ) -> Result<String, String> {
+        self.requests
+            .lock()
+            .expect("requests mutex")
+            .push(request.clone());
+        Ok(self
+            .response_text
+            .lock()
+            .expect("response_text mutex")
+            .clone())
+    }
+}
+
 #[async_trait]
 impl ItermMcpAdapter for DelayedOutputAdapter {
     async fn list_sessions(&self) -> Result<Vec<ItermSessionInfo>, String> {
@@ -182,10 +257,11 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
 
     let success_profile = profile_service
         .create_profile(CreateProfileInput {
-            name: "GPT 5.4".to_string(),
-            provider: "openai".to_string(),
-            model_name: "gpt-5.4".to_string(),
-            base_url: "https://api.example.com/v1".to_string(),
+            name: "Claude Success".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
             api_key: "success-secret".to_string(),
         })
         .await?;
@@ -193,6 +269,7 @@ async fn executes_run_and_persists_target_outcomes() -> Result<(), Box<dyn std::
         .create_profile(CreateProfileInput {
             name: "Claude".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-3.7".to_string(),
             base_url: "https://api.anthropic.example.com".to_string(),
             api_key: "fail-secret".to_string(),
@@ -320,6 +397,7 @@ async fn broadcasts_follow_up_input_into_running_target_sessions(
         .create_profile(CreateProfileInput {
             name: "Claude".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-3.7".to_string(),
             base_url: "https://api.anthropic.example.com".to_string(),
             api_key: "secret".to_string(),
@@ -395,10 +473,11 @@ async fn rejects_run_when_target_session_is_offline() -> Result<(), Box<dyn std:
 
     let profile = profile_service
         .create_profile(CreateProfileInput {
-            name: "GPT 5.4".to_string(),
-            provider: "openai".to_string(),
-            model_name: "gpt-5.4".to_string(),
-            base_url: "https://api.example.com/v1".to_string(),
+            name: "Claude Offline".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
             api_key: "success-secret".to_string(),
         })
         .await?;
@@ -448,6 +527,95 @@ async fn rejects_run_when_target_session_is_offline() -> Result<(), Box<dyn std:
 }
 
 #[tokio::test]
+async fn openai_chat_run_does_not_require_online_iterm_session(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = FakeAdapter::default();
+    let openai_executor = Arc::new(FakeOpenaiExecutor::default());
+    let orchestrator = ComparisonOrchestrator::with_dependencies_and_openai_executor(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+        openai_executor.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4 Offline".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "success-secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "OpenAI offline session case".to_string(),
+            prompt: "Summarize the core control flow".to_string(),
+            context_payload: "{\"files\":[\"legacy/service.rb\"]}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-offline".to_string(),
+            display_name: "Window Offline".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "OpenAI offline compare".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.validate_run_startup(&run.id).await?;
+    orchestrator.execute_run(&run.id).await?;
+
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "done");
+    assert!(updated_run.started_at.is_some());
+
+    let targets = run_service.list_comparison_targets(&run.id).await?;
+    assert_eq!(targets[0].status, "done");
+    assert_eq!(targets[0].success_status.as_deref(), Some("completed"));
+    assert_eq!(
+        targets[0].latest_message_content.as_deref(),
+        Some("OpenAI direct result")
+    );
+
+    assert!(adapter
+        .sent_texts
+        .lock()
+        .expect("sent_texts mutex")
+        .is_empty());
+    assert!(adapter
+        .screen_reads
+        .lock()
+        .expect("screen_reads mutex")
+        .is_empty());
+
+    let requests = openai_executor.requests.lock().expect("requests mutex");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].session_id, "session-offline");
+    assert_eq!(requests[0].execution_mode, "openai_chat");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pool = support::create_test_pool().await?;
@@ -465,10 +633,11 @@ async fn waits_for_delayed_interactive_output_before_persisting_target_preview(
 
     let profile = profile_service
         .create_profile(CreateProfileInput {
-            name: "GPT 5.4".to_string(),
-            provider: "openai".to_string(),
-            model_name: "gpt-5.4".to_string(),
-            base_url: "https://api.example.com/v1".to_string(),
+            name: "Claude Delayed".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-3.7".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
             api_key: "secret".to_string(),
         })
         .await?;
@@ -549,6 +718,7 @@ async fn surfaces_profile_and_target_when_secret_is_missing_at_startup(
         .create_profile(CreateProfileInput {
             name: "Claude Missing Secret".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-3.7".to_string(),
             base_url: "https://api.anthropic.example.com".to_string(),
             api_key: "secret".to_string(),
@@ -584,11 +754,269 @@ async fn surfaces_profile_and_target_when_secret_is_missing_at_startup(
         .await?;
 
     let result = orchestrator.validate_run_startup(&run.id).await;
-    let error_message = result.err().map(|error| error.to_string()).unwrap_or_default();
+    let error_message = result
+        .err()
+        .map(|error| error.to_string())
+        .unwrap_or_default();
 
     assert!(error_message.contains("profile `Claude Missing Secret`"));
     assert!(error_message.contains("target `Window Missing Secret`"));
     assert!(error_message.contains("re-save the API key"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn openai_chat_targets_complete_without_terminal_incremental_capture(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = OpenaiOnlyAdapter::default();
+    let openai_executor = Arc::new(FakeOpenaiExecutor::default());
+    let orchestrator = ComparisonOrchestrator::with_dependencies_and_openai_executor(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+        openai_executor.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Direct OpenAI case".to_string(),
+            prompt: "Summarize the code path".to_string(),
+            context_payload: "{\"files\":[\"parser.rs\"]}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-openai".to_string(),
+            display_name: "Window OpenAI".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "OpenAI direct execution".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.execute_run(&run.id).await?;
+
+    let updated_run = run_service.get_comparison_run(&run.id).await?;
+    assert_eq!(updated_run.status, "done");
+
+    let targets = run_service.list_comparison_targets(&run.id).await?;
+    let target = targets
+        .iter()
+        .find(|target| target.window_binding_id == binding.id)
+        .expect("target should exist");
+    assert_eq!(target.status, "done");
+    assert_eq!(target.success_status.as_deref(), Some("completed"));
+    assert_eq!(
+        target.latest_message_content.as_deref(),
+        Some("OpenAI direct result")
+    );
+
+    assert!(adapter
+        .sent_texts
+        .lock()
+        .expect("sent_texts mutex")
+        .is_empty());
+    assert!(adapter
+        .screen_reads
+        .lock()
+        .expect("screen_reads mutex")
+        .is_empty());
+
+    let requests = openai_executor.requests.lock().expect("requests mutex");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].execution_mode, "openai_chat");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn startup_validation_skips_claude_launch_command_for_openai_chat(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = OpenaiOnlyAdapter::default();
+    let openai_executor = Arc::new(FakeOpenaiExecutor::default());
+    let orchestrator = ComparisonOrchestrator::with_dependencies_and_openai_executor(
+        pool.clone(),
+        secret_store.clone(),
+        adapter,
+        openai_executor,
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    sqlx::query("UPDATE model_profiles SET extra_params_json = '{\"cwd\":123}' WHERE id = ?")
+        .bind(&profile.id)
+        .execute(&pool)
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "Startup validation".to_string(),
+            prompt: "Validate startup".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-openai".to_string(),
+            display_name: "Window OpenAI".to_string(),
+            profile_id: profile.id,
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "OpenAI startup validation".to_string(),
+            target_ids: vec![binding.id],
+            notes: None,
+        })
+        .await?;
+
+    orchestrator.validate_run_startup(&run.id).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn broadcasts_follow_up_for_openai_chat_without_terminal_io(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let profile_service = ProfileService::with_secret_store(pool.clone(), secret_store.clone());
+    let case_service = EvaluationCaseService::new(pool.clone());
+    let binding_service = WindowBindingService::new(pool.clone());
+    let run_service = ComparisonRunService::new(pool.clone());
+    let adapter = OpenaiOnlyAdapter::default();
+    let openai_executor = Arc::new(FakeOpenaiExecutor::default());
+    *openai_executor
+        .response_text
+        .lock()
+        .expect("response_text mutex") = "OpenAI follow-up result".to_string();
+    let orchestrator = ComparisonOrchestrator::with_dependencies_and_openai_executor(
+        pool.clone(),
+        secret_store.clone(),
+        adapter.clone(),
+        openai_executor.clone(),
+    );
+
+    let profile = profile_service
+        .create_profile(CreateProfileInput {
+            name: "GPT 5.4".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret".to_string(),
+        })
+        .await?;
+
+    let case = case_service
+        .create_evaluation_case(CreateEvaluationCaseInput {
+            title: "OpenAI follow-up case".to_string(),
+            prompt: "Initial prompt".to_string(),
+            context_payload: "{}".to_string(),
+            notes: None,
+        })
+        .await?;
+
+    let binding = binding_service
+        .create_window_binding(CreateWindowBindingInput {
+            iterm_session_id: "session-openai".to_string(),
+            display_name: "Window OpenAI".to_string(),
+            profile_id: profile.id.clone(),
+        })
+        .await?;
+
+    let run = run_service
+        .create_comparison_run(CreateComparisonRunInput {
+            evaluation_case_id: case.id,
+            title: "OpenAI follow-up run".to_string(),
+            target_ids: vec![binding.id.clone()],
+            notes: None,
+        })
+        .await?;
+
+    let target = run_service
+        .list_comparison_targets(&run.id)
+        .await?
+        .into_iter()
+        .find(|target| target.window_binding_id == binding.id)
+        .expect("target should exist");
+
+    run_service.mark_run_started(&run.id).await?;
+    run_service.mark_target_running(&target.id).await?;
+
+    orchestrator
+        .broadcast_message(&run.id, "Continue with parser edge cases")
+        .await?;
+
+    assert!(adapter
+        .sent_texts
+        .lock()
+        .expect("sent_texts mutex")
+        .is_empty());
+    assert!(adapter
+        .screen_reads
+        .lock()
+        .expect("screen_reads mutex")
+        .is_empty());
+
+    let requests = openai_executor.requests.lock().expect("requests mutex");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].execution_mode, "openai_chat");
+    assert_eq!(requests[0].prompt, "Continue with parser edge cases");
+
+    let stored_messages =
+        sqlx::query_scalar::<_, String>("SELECT content FROM messages ORDER BY created_at ASC")
+            .fetch_all(&pool)
+            .await?;
+    let combined_messages = stored_messages.join("\n---\n");
+    assert!(combined_messages.contains("Continue with parser edge cases"));
+    assert!(combined_messages.contains("OpenAI follow-up result"));
 
     Ok(())
 }

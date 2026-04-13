@@ -70,6 +70,7 @@ describe("target config tauri bindings", () => {
     await updateProfile("profile-1", {
       name: "Profile",
       provider: "openai",
+      execution_mode: "openai_chat",
       model_name: "gpt-5.4",
       base_url: "https://api.example.com/v1",
       api_key: "secret",
@@ -88,6 +89,7 @@ describe("target config tauri bindings", () => {
       input: {
         name: "Profile",
         provider: "openai",
+        execution_mode: "openai_chat",
         model_name: "gpt-5.4",
         base_url: "https://api.example.com/v1",
         api_key: "secret",

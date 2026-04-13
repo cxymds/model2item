@@ -1,5 +1,10 @@
 import { useState } from "react";
-import type { CreateProfileInput } from "../../../types/api";
+import {
+  EXECUTION_MODE_OPTIONS,
+  PROVIDER_BY_EXECUTION_MODE,
+  normalizeExecutionMode,
+  type CreateProfileInput,
+} from "../../../types/api";
 
 type ProfileFormProps = {
   isPending: boolean;
@@ -8,7 +13,8 @@ type ProfileFormProps = {
 
 const initialState: CreateProfileInput = {
   name: "",
-  provider: "",
+  execution_mode: "claude_cli",
+  provider: "anthropic",
   model_name: "",
   base_url: "",
   api_key: "",
@@ -23,7 +29,10 @@ export function ProfileForm({ isPending, onSubmit }: ProfileFormProps) {
       onSubmit={(event) => {
         event.preventDefault();
         if (!form.name.trim() || !form.model_name.trim() || !form.api_key.trim()) return;
-        onSubmit(form);
+        onSubmit({
+          ...form,
+          provider: PROVIDER_BY_EXECUTION_MODE[form.execution_mode],
+        });
         setForm(initialState);
       }}
     >
@@ -40,12 +49,31 @@ export function ProfileForm({ isPending, onSubmit }: ProfileFormProps) {
       </label>
 
       <label className="field">
+        <span>执行模式</span>
+        <select
+          value={form.execution_mode}
+          onChange={(event) => {
+            const executionMode = normalizeExecutionMode(event.target.value);
+            setForm((current) => ({
+              ...current,
+              execution_mode: executionMode,
+              provider: PROVIDER_BY_EXECUTION_MODE[executionMode],
+            }));
+          }}
+        >
+          {EXECUTION_MODE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="field">
         <span>提供方</span>
         <input
           value={form.provider}
-          onChange={(event) => {
-            setForm((current) => ({ ...current, provider: event.target.value }));
-          }}
+          readOnly
           placeholder="openai"
           required
         />

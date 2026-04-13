@@ -112,6 +112,7 @@ async fn rejects_deleting_evaluation_case_when_it_is_referenced_by_run(
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),

@@ -28,6 +28,7 @@ async fn creates_comparison_run_and_target_snapshots() -> Result<(), Box<dyn std
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -69,6 +70,9 @@ async fn creates_comparison_run_and_target_snapshots() -> Result<(), Box<dyn std
     assert!(targets[0]
         .profile_snapshot_json
         .contains("\"provider\":\"openai\""));
+    assert!(targets[0]
+        .profile_snapshot_json
+        .contains("\"execution_mode\":\"openai_chat\""));
     assert!(targets[0]
         .profile_snapshot_json
         .contains("\"model_name\":\"gpt-5.4\""));
@@ -155,6 +159,7 @@ async fn rejects_creating_a_second_active_comparison_run() -> Result<(), Box<dyn
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -216,6 +221,7 @@ async fn deduplicates_duplicate_target_ids_and_keeps_input_order(
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -288,6 +294,7 @@ async fn lists_recent_comparison_runs_in_descending_order_with_limit(
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -350,6 +357,7 @@ async fn reconciles_closed_sessions_for_queued_and_running_targets_in_one_active
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),

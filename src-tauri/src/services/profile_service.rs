@@ -17,6 +17,22 @@ pub struct ProfileService {
 }
 
 impl ProfileService {
+    fn normalize_execution_mode(execution_mode: &str) -> &'static str {
+        if execution_mode == "openai_chat" {
+            "openai_chat"
+        } else {
+            "claude_cli"
+        }
+    }
+
+    fn provider_for_execution_mode(execution_mode: &str) -> &'static str {
+        if execution_mode == "openai_chat" {
+            "openai"
+        } else {
+            "anthropic"
+        }
+    }
+
     pub fn new(pool: SqlitePool) -> Self {
         Self::with_secret_store(pool, Arc::new(SystemSecretStore))
     }
@@ -32,19 +48,22 @@ impl ProfileService {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         let api_key_locator = profile_secret_locator(&id);
+        let execution_mode = Self::normalize_execution_mode(&input.execution_mode);
+        let provider = Self::provider_for_execution_mode(execution_mode);
         self.secret_store
             .set_secret(&api_key_locator, &input.api_key)?;
 
         sqlx::query(
             r#"
             INSERT INTO model_profiles
-              (id, name, provider, model_name, base_url, api_key_encrypted, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              (id, name, provider, execution_mode, model_name, base_url, api_key_encrypted, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
         .bind(&input.name)
-        .bind(&input.provider)
+        .bind(provider)
+        .bind(execution_mode)
         .bind(&input.model_name)
         .bind(&input.base_url)
         .bind(&api_key_locator)
@@ -82,6 +101,8 @@ impl ProfileService {
     ) -> Result<ModelProfileRecord, AppError> {
         let now = Utc::now().to_rfc3339();
         let api_key_locator = profile_secret_locator(id);
+        let execution_mode = Self::normalize_execution_mode(&input.execution_mode);
+        let provider = Self::provider_for_execution_mode(execution_mode);
         if !input.api_key.trim().is_empty() {
             self.secret_store
                 .set_secret(&api_key_locator, &input.api_key)?;
@@ -93,6 +114,7 @@ impl ProfileService {
             SET
               name = ?,
               provider = ?,
+              execution_mode = ?,
               model_name = ?,
               base_url = ?,
               api_key_encrypted = ?,
@@ -101,7 +123,8 @@ impl ProfileService {
             "#,
         )
         .bind(&input.name)
-        .bind(&input.provider)
+        .bind(provider)
+        .bind(execution_mode)
         .bind(&input.model_name)
         .bind(&input.base_url)
         .bind(&api_key_locator)

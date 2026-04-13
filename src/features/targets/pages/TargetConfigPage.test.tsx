@@ -3,8 +3,23 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import { TargetConfigPage } from "./TargetConfigPage";
 
-const { updateWindowBinding, deleteWindowBinding, updateProfile, deleteProfile } = vi.hoisted(() => {
+const { createProfile, updateWindowBinding, deleteWindowBinding, updateProfile, deleteProfile } =
+  vi.hoisted(() => {
   return {
+    createProfile: vi.fn().mockResolvedValue({
+      id: "profile-2",
+      name: "Claude Sonnet",
+      provider: "anthropic",
+      execution_mode: "claude_cli",
+      model_name: "claude-sonnet-4",
+      base_url: "https://api.anthropic.example.com",
+      system_prompt: "",
+      temperature: null,
+      max_tokens: null,
+      extra_params_json: "{}",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    }),
     updateWindowBinding: vi.fn().mockResolvedValue({
       id: "binding-1",
       iterm_session_id: "session-1b",
@@ -21,6 +36,7 @@ const { updateWindowBinding, deleteWindowBinding, updateProfile, deleteProfile }
       id: "profile-1",
       name: "GPT-5.4 updated",
       provider: "openai",
+      execution_mode: "openai_chat",
       model_name: "gpt-5.4-mini",
       base_url: "https://api.example.com/v2",
       system_prompt: "",
@@ -32,11 +48,11 @@ const { updateWindowBinding, deleteWindowBinding, updateProfile, deleteProfile }
     }),
     deleteProfile: vi.fn().mockResolvedValue(undefined),
   };
-});
+  });
 
 vi.mock("../../../lib/tauri", () => {
   return {
-    createProfile: vi.fn(),
+    createProfile,
     updateProfile,
     deleteProfile,
     createWindowBinding: vi.fn(),
@@ -47,6 +63,7 @@ vi.mock("../../../lib/tauri", () => {
         id: "profile-1",
         name: "GPT-5.4 baseline",
         provider: "openai",
+        execution_mode: "openai_chat",
         model_name: "gpt-5.4",
         base_url: "https://api.example.com/v1",
         system_prompt: "",
@@ -121,6 +138,13 @@ describe("TargetConfigPage", () => {
     expect(screen.getByText("连接状态：离线")).toBeInTheDocument();
   });
 
+  it("prefers execution mode labels in profile list", async () => {
+    renderPage();
+
+    expect(await screen.findByText("OpenAI Chat / gpt-5.4")).toBeInTheDocument();
+    expect(screen.queryByText("openai / gpt-5.4")).not.toBeInTheDocument();
+  });
+
   it("updates an existing window binding", async () => {
     renderPage();
 
@@ -169,15 +193,55 @@ describe("TargetConfigPage", () => {
     fireEvent.change(screen.getByPlaceholderText("留空则保持当前密钥"), {
       target: { value: "new-secret" },
     });
+    fireEvent.change((await screen.findAllByLabelText("执行模式"))[1], {
+      target: { value: "claude_cli" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "保存配置" }));
 
     await waitFor(() => {
       expect(updateProfile).toHaveBeenCalledWith("profile-1", {
         name: "GPT-5.4 updated",
-        provider: "openai",
+        provider: "anthropic",
+        execution_mode: "claude_cli",
         model_name: "gpt-5.4-mini",
         base_url: "https://api.example.com/v2",
         api_key: "new-secret",
+      });
+    });
+  });
+
+  it("creates a profile with selected execution_mode in payload", async () => {
+    renderPage();
+
+    expect(await screen.findByRole("option", { name: "Claude CLI" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "OpenAI Chat" })).toBeInTheDocument();
+
+    fireEvent.change(await screen.findByPlaceholderText("GPT-5.4 基线"), {
+      target: { value: "Claude Sonnet" },
+    });
+    fireEvent.change(screen.getByLabelText("执行模式"), {
+      target: { value: "openai_chat" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("gpt-5.4"), {
+      target: { value: "gpt-5.4-mini" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+      target: { value: "https://api.openai.example.com" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("sk-..."), {
+      target: { value: "secret-new" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建配置" }));
+
+    await waitFor(() => {
+      expect(createProfile).toHaveBeenCalled();
+      expect(createProfile.mock.calls[0]?.[0]).toEqual({
+        name: "Claude Sonnet",
+        provider: "openai",
+        execution_mode: "openai_chat",
+        model_name: "gpt-5.4-mini",
+        base_url: "https://api.openai.example.com",
+        api_key: "secret-new",
       });
     });
   });
@@ -195,6 +259,7 @@ describe("TargetConfigPage", () => {
       expect(updateProfile).toHaveBeenCalledWith("profile-1", {
         name: "GPT-5.4 baseline",
         provider: "openai",
+        execution_mode: "openai_chat",
         model_name: "gpt-5.4-turbo",
         base_url: "https://api.example.com/v1",
         api_key: "",

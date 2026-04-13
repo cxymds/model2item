@@ -107,6 +107,7 @@ async fn creates_and_lists_window_bindings() -> Result<(), Box<dyn std::error::E
         .create_profile(CreateProfileInput {
             name: "Claude Sonnet".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-sonnet".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -161,6 +162,7 @@ async fn syncs_last_seen_for_online_window_bindings() -> Result<(), Box<dyn std:
         .create_profile(CreateProfileInput {
             name: "Claude Sonnet".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-sonnet".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -210,6 +212,7 @@ async fn updates_window_binding_details() -> Result<(), Box<dyn std::error::Erro
         .create_profile(CreateProfileInput {
             name: "Claude Sonnet".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-sonnet".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -220,6 +223,7 @@ async fn updates_window_binding_details() -> Result<(), Box<dyn std::error::Erro
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-2".to_string(),
@@ -266,6 +270,7 @@ async fn rejects_deleting_window_binding_when_it_is_referenced_by_run(
         .create_profile(CreateProfileInput {
             name: "Claude Sonnet".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-sonnet".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -319,6 +324,7 @@ async fn allows_deleting_window_binding_when_only_finished_runs_reference_it(
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -375,6 +381,7 @@ async fn applies_binding_to_window_session_and_writes_visible_notice(
         .create_profile(CreateProfileInput {
             name: "Claude Sonnet".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-sonnet-4".to_string(),
             base_url: "https://gateway.example.com".to_string(),
             api_key: "secret".to_string(),
@@ -417,6 +424,7 @@ async fn rolls_back_created_binding_when_window_sync_fails(
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -455,6 +463,7 @@ async fn sync_removes_unreferenced_bindings_for_closed_sessions(
         .create_profile(CreateProfileInput {
             name: "Claude Sonnet".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-sonnet".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),
@@ -501,6 +510,7 @@ async fn sync_keeps_referenced_bindings_even_if_session_is_closed(
         .create_profile(CreateProfileInput {
             name: "Claude Sonnet".to_string(),
             provider: "anthropic".to_string(),
+            execution_mode: "claude_cli".to_string(),
             model_name: "claude-sonnet".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret".to_string(),

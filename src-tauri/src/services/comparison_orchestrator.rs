@@ -1,14 +1,17 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_trait::async_trait;
+
 use crate::{
     error::AppError,
     services::{
         comparison_run_service::{ComparisonRunService, ComparisonTargetExecutionRecord},
         iterm_mcp_adapter::{
-            build_interactive_claude_launch_command, classify_adapter_error, ItermExecutionRequest,
+            build_claude_cli_launch_command, classify_adapter_error, ItermExecutionRequest,
             ItermMcpAdapter, PythonItermMcpAdapter,
         },
+        openai_chat_executor::OpenaiChatExecutor,
         secret_store::{SecretStore, SystemSecretStore},
     },
 };
@@ -22,6 +25,25 @@ pub struct ComparisonOrchestrator<A: ItermMcpAdapter> {
     run_service: ComparisonRunService,
     secret_store: Arc<dyn SecretStore>,
     adapter: A,
+    openai_executor: Arc<dyn OpenaiChatCompletionExecutor>,
+}
+
+#[async_trait]
+pub trait OpenaiChatCompletionExecutor: Send + Sync {
+    async fn execute_chat_completion(
+        &self,
+        request: &ItermExecutionRequest,
+    ) -> Result<String, String>;
+}
+
+#[async_trait]
+impl OpenaiChatCompletionExecutor for OpenaiChatExecutor {
+    async fn execute_chat_completion(
+        &self,
+        request: &ItermExecutionRequest,
+    ) -> Result<String, String> {
+        OpenaiChatExecutor::execute_chat_completion(self, request).await
+    }
 }
 
 impl ComparisonOrchestrator<PythonItermMcpAdapter> {
@@ -30,11 +52,16 @@ impl ComparisonOrchestrator<PythonItermMcpAdapter> {
             run_service: ComparisonRunService::new(pool),
             secret_store: Arc::new(SystemSecretStore),
             adapter: PythonItermMcpAdapter::default(),
+            openai_executor: Arc::new(OpenaiChatExecutor::default()),
         }
     }
 }
 
 impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
+    fn requires_online_session(target: &ComparisonTargetExecutionRecord) -> bool {
+        target.execution_mode == "claude_cli"
+    }
+
     fn map_secret_lookup_error(
         target_display_name: &str,
         profile_name: &str,
@@ -126,10 +153,25 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
         secret_store: Arc<dyn SecretStore>,
         adapter: A,
     ) -> Self {
+        Self::with_dependencies_and_openai_executor(
+            pool,
+            secret_store,
+            adapter,
+            Arc::new(OpenaiChatExecutor::default()),
+        )
+    }
+
+    pub fn with_dependencies_and_openai_executor(
+        pool: sqlx::SqlitePool,
+        secret_store: Arc<dyn SecretStore>,
+        adapter: A,
+        openai_executor: Arc<dyn OpenaiChatCompletionExecutor>,
+    ) -> Self {
         Self {
             run_service: ComparisonRunService::new(pool),
             secret_store,
             adapter,
+            openai_executor,
         }
     }
 
@@ -158,6 +200,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                 request_id: target.target_id,
                 session_id: target.iterm_session_id,
                 prompt: build_target_prompt(&run.prompt_snapshot, &run.context_snapshot),
+                execution_mode: target.execution_mode.clone(),
                 provider: target.provider,
                 model_name: target.model_name,
                 base_url: target.base_url,
@@ -166,7 +209,9 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
                 extra_params_json: target.extra_params_json,
             };
 
-            build_interactive_claude_launch_command(&request).map_err(AppError::Adapter)?;
+            if target.execution_mode == "claude_cli" {
+                build_claude_cli_launch_command(&request).map_err(AppError::Adapter)?;
+            }
         }
 
         Ok(())
@@ -230,24 +275,63 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             self.run_service
                 .store_target_message(&target.target_id, "user", prompt, "follow_up")
                 .await?;
-            let baseline_screen = self.read_screen_text(&target.iterm_session_id).await?;
-            self.adapter
-                .send_text(&target.iterm_session_id, &format!("{prompt}\n"))
-                .await
-                .map_err(classify_adapter_error)?;
-            tokio::time::sleep(Duration::from_millis(250)).await;
-            let baseline_after_prompt = self.read_screen_text(&target.iterm_session_id).await?;
-            let baseline = if baseline_after_prompt.trim().is_empty() {
-                baseline_screen.as_str()
+            if target.execution_mode == "openai_chat" {
+                let api_key = self
+                    .secret_store
+                    .get_secret(&target.api_key_locator)
+                    .map_err(|error| {
+                        Self::map_secret_lookup_error(
+                            &target.display_name,
+                            &target.profile_name,
+                            error,
+                        )
+                    })?;
+                let request = ItermExecutionRequest {
+                    request_id: target.target_id.clone(),
+                    session_id: target.iterm_session_id.clone(),
+                    prompt: prompt.to_string(),
+                    execution_mode: target.execution_mode.clone(),
+                    provider: target.provider.clone(),
+                    model_name: target.model_name.clone(),
+                    base_url: target.base_url.clone(),
+                    api_key,
+                    system_prompt: target.system_prompt.clone(),
+                    extra_params_json: target.extra_params_json.clone(),
+                };
+
+                match self.openai_executor.execute_chat_completion(&request).await {
+                    Ok(output_text) => {
+                        self.run_service
+                            .record_target_interactive_output(&target.target_id, &output_text)
+                            .await?;
+                    }
+                    Err(error) => {
+                        self.run_service
+                            .mark_target_failed(&target.target_id, "execution_error", &error)
+                            .await?;
+                        return Err(AppError::Adapter(error));
+                    }
+                }
             } else {
-                baseline_after_prompt.as_str()
-            };
-            let (_, delta) = self
-                .capture_incremental_interactive_output(&target.iterm_session_id, baseline)
-                .await?;
-            self.run_service
-                .record_target_interactive_output(&target.target_id, &delta)
-                .await?;
+                let baseline_screen = self.read_screen_text(&target.iterm_session_id).await?;
+                self.adapter
+                    .send_text(&target.iterm_session_id, &format!("{prompt}\n"))
+                    .await
+                    .map_err(classify_adapter_error)?;
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                let baseline_after_prompt = self.read_screen_text(&target.iterm_session_id).await?;
+                let baseline = if baseline_after_prompt.trim().is_empty() {
+                    baseline_screen.as_str()
+                } else {
+                    baseline_after_prompt.as_str()
+                };
+                let (_, delta) = self
+                    .capture_incremental_interactive_output(&target.iterm_session_id, baseline)
+                    .await?;
+                self.run_service
+                    .record_target_interactive_output(&target.target_id, &delta)
+                    .await?;
+            }
         }
 
         Ok(())
@@ -257,6 +341,15 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
         &self,
         targets: &[ComparisonTargetExecutionRecord],
     ) -> Result<(), AppError> {
+        let terminal_targets = targets
+            .iter()
+            .filter(|target| Self::requires_online_session(target))
+            .collect::<Vec<_>>();
+
+        if terminal_targets.is_empty() {
+            return Ok(());
+        }
+
         let online_session_ids = self
             .adapter
             .list_sessions()
@@ -266,7 +359,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             .map(|session| session.session_id)
             .collect::<std::collections::HashSet<_>>();
 
-        let offline_targets = targets
+        let offline_targets = terminal_targets
             .iter()
             .filter(|target| !online_session_ids.contains(&target.iterm_session_id))
             .map(|target| format!("{} ({})", target.display_name, target.iterm_session_id))
@@ -307,6 +400,7 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             request_id: target.target_id.clone(),
             session_id: target.iterm_session_id.clone(),
             prompt: request_prompt.clone(),
+            execution_mode: target.execution_mode.clone(),
             provider: target.provider.clone(),
             model_name: target.model_name.clone(),
             base_url: target.base_url.clone(),
@@ -315,53 +409,71 @@ impl<A: ItermMcpAdapter> ComparisonOrchestrator<A> {
             extra_params_json: target.extra_params_json.clone(),
         };
 
-        let launch_command = build_interactive_claude_launch_command(&request);
-        let result = match launch_command {
-            Ok(command) => {
-                if let Err(error) = self
-                    .adapter
-                    .send_text(&target.iterm_session_id, &command)
-                    .await
-                {
-                    Err(error)
-                } else {
-                    tokio::time::sleep(Duration::from_millis(1200)).await;
+        let result = if target.execution_mode == "openai_chat" {
+            self.openai_executor.execute_chat_completion(&request).await
+        } else {
+            let launch_command = build_claude_cli_launch_command(&request);
+            match launch_command {
+                Ok(command) => {
                     if let Err(error) = self
                         .adapter
-                        .send_text(&target.iterm_session_id, &format!("{request_prompt}\n"))
+                        .send_text(&target.iterm_session_id, &command)
                         .await
                     {
                         Err(error)
                     } else {
-                        tokio::time::sleep(Duration::from_millis(250)).await;
-                        match self.read_screen_text(&target.iterm_session_id).await {
-                            Ok(baseline_after_prompt) => self
-                                .capture_incremental_interactive_output(
-                                    &target.iterm_session_id,
-                                    &baseline_after_prompt,
-                                )
-                                .await
-                                .map(|(_, delta)| delta)
-                                .map_err(|error| error.to_string()),
-                            Err(error) => Err(error.to_string()),
+                        tokio::time::sleep(Duration::from_millis(1200)).await;
+                        if let Err(error) = self
+                            .adapter
+                            .send_text(&target.iterm_session_id, &format!("{request_prompt}\n"))
+                            .await
+                        {
+                            Err(error)
+                        } else {
+                            tokio::time::sleep(Duration::from_millis(250)).await;
+                            match self.read_screen_text(&target.iterm_session_id).await {
+                                Ok(baseline_after_prompt) => self
+                                    .capture_incremental_interactive_output(
+                                        &target.iterm_session_id,
+                                        &baseline_after_prompt,
+                                    )
+                                    .await
+                                    .map(|(_, delta)| delta)
+                                    .map_err(|error| error.to_string()),
+                                Err(error) => Err(error.to_string()),
+                            }
                         }
                     }
                 }
+                Err(error) => Err(error),
             }
-            Err(error) => Err(error),
         };
 
-        match result {
-            Ok(output_text) => {
+        match (target.execution_mode.as_str(), result) {
+            ("openai_chat", Ok(output_text)) => {
+                self.run_service
+                    .mark_target_completed(&target.target_id, &output_text)
+                    .await
+            }
+            (_, Ok(output_text)) => {
                 self.run_service
                     .record_target_interactive_output(&target.target_id, &output_text)
                     .await
             }
-            Err(error) => {
+            (_, Err(error)) => {
+                let error_category = if target.execution_mode == "openai_chat" {
+                    "execution_error"
+                } else {
+                    "adapter_error"
+                };
                 self.run_service
-                    .mark_target_failed(&target.target_id, "adapter_error", &error)
+                    .mark_target_failed(&target.target_id, error_category, &error)
                     .await?;
-                Err(classify_adapter_error(error))
+                if target.execution_mode == "openai_chat" {
+                    Err(AppError::Adapter(error))
+                } else {
+                    Err(classify_adapter_error(error))
+                }
             }
         }
     }

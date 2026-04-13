@@ -15,7 +15,13 @@ import {
 import { formatDateTime } from "../../../lib/formatters";
 import { ProfileForm } from "../components/ProfileForm";
 import { WindowBindingList } from "../components/WindowBindingList";
-import type { UpdateProfileInput } from "../../../types/api";
+import {
+  EXECUTION_MODE_OPTIONS,
+  PROVIDER_BY_EXECUTION_MODE,
+  getExecutionModeLabel,
+  normalizeExecutionMode,
+  type UpdateProfileInput,
+} from "../../../types/api";
 
 function getErrorMessage(error: unknown) {
   const message = String(error);
@@ -27,7 +33,8 @@ export function TargetConfigPage() {
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [editingProfileForm, setEditingProfileForm] = useState<UpdateProfileInput>({
     name: "",
-    provider: "",
+    provider: "anthropic",
+    execution_mode: "claude_cli",
     model_name: "",
     base_url: "",
     api_key: "",
@@ -151,13 +158,28 @@ export function TargetConfigPage() {
                         <span>提供方</span>
                         <input
                           value={editingProfileForm.provider}
+                          readOnly
+                        />
+                      </label>
+                      <label className="field">
+                        <span>执行模式</span>
+                        <select
+                          value={editingProfileForm.execution_mode}
                           onChange={(event) => {
+                            const executionMode = normalizeExecutionMode(event.target.value);
                             setEditingProfileForm((current) => ({
                               ...current,
-                              provider: event.target.value,
+                              execution_mode: executionMode,
+                              provider: PROVIDER_BY_EXECUTION_MODE[executionMode],
                             }));
                           }}
-                        />
+                        >
+                          {EXECUTION_MODE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </label>
                       <label className="field">
                         <span>模型名称</span>
@@ -202,9 +224,16 @@ export function TargetConfigPage() {
                           className="primary-btn"
                           disabled={updateProfileMutation.isPending}
                           onClick={() => {
+                            const executionMode = normalizeExecutionMode(
+                              editingProfileForm.execution_mode,
+                            );
                             updateProfileMutation.mutate({
                               id: profile.id,
-                              input: editingProfileForm,
+                              input: {
+                                ...editingProfileForm,
+                                execution_mode: executionMode,
+                                provider: PROVIDER_BY_EXECUTION_MODE[executionMode],
+                              },
                             });
                             setEditingProfileId(null);
                           }}
@@ -227,7 +256,8 @@ export function TargetConfigPage() {
                     <>
                       <strong>{profile.name}</strong>
                       <span>
-                        {profile.provider} / {profile.model_name}
+                        {getExecutionModeLabel(normalizeExecutionMode(profile.execution_mode))} /{" "}
+                        {profile.model_name}
                       </span>
                       <span>{profile.base_url}</span>
                       <span>更新时间：{formatDateTime(profile.updated_at)}</span>
@@ -236,9 +266,11 @@ export function TargetConfigPage() {
                           className="ghost-btn"
                           onClick={() => {
                             setEditingProfileId(profile.id);
+                            const executionMode = normalizeExecutionMode(profile.execution_mode);
                             setEditingProfileForm({
                               name: profile.name,
-                              provider: profile.provider,
+                              provider: PROVIDER_BY_EXECUTION_MODE[executionMode],
+                              execution_mode: executionMode,
                               model_name: profile.model_name,
                               base_url: profile.base_url,
                               api_key: "",

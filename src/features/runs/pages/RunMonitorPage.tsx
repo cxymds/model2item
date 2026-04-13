@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import {
   listTargetMessages,
@@ -62,11 +62,18 @@ function TargetConversationDrawer({ targetId, expanded, onToggle }: TargetConver
     enabled: true,
     refetchInterval: 2000,
   });
-  const currentMessageIds = targetMessagesQuery.data?.map((message) => message.id) ?? [];
-  const nextHighlightedIds = new Set(
-    previousMessageIdsRef.current === null
-      ? currentMessageIds
-      : currentMessageIds.filter((id) => !previousMessageIdsRef.current?.includes(id)),
+  const currentMessageIds = useMemo(
+    () => targetMessagesQuery.data?.map((message) => message.id) ?? [],
+    [targetMessagesQuery.data],
+  );
+  const nextHighlightedIds = useMemo(
+    () =>
+      new Set(
+        previousMessageIdsRef.current === null
+          ? currentMessageIds
+          : currentMessageIds.filter((id) => !previousMessageIdsRef.current?.includes(id)),
+      ),
+    [currentMessageIds],
   );
   const groups = buildMessageGroups(targetMessagesQuery.data ?? []);
 
@@ -92,7 +99,7 @@ function TargetConversationDrawer({ targetId, expanded, onToggle }: TargetConver
     }
 
     previousMessageIdsRef.current = currentMessageIds;
-  }, [currentMessageIds, expanded, isFollowPaused, nextHighlightedIds.size, targetMessagesQuery.data]);
+  }, [currentMessageIds, expanded, isFollowPaused, nextHighlightedIds, targetMessagesQuery.data]);
 
   return (
     <div className="stack-block" style={{ gap: 8 }}>

@@ -1,7 +1,30 @@
+export const EXECUTION_MODE_OPTIONS = [
+  { value: "claude_cli", label: "Claude CLI" },
+  { value: "openai_chat", label: "OpenAI Chat" },
+] as const;
+
+export type ExecutionMode = (typeof EXECUTION_MODE_OPTIONS)[number]["value"];
+
+export type Provider = "anthropic" | "openai";
+
+export const PROVIDER_BY_EXECUTION_MODE: Record<ExecutionMode, Provider> = {
+  claude_cli: "anthropic",
+  openai_chat: "openai",
+};
+
+export function normalizeExecutionMode(executionMode: string): ExecutionMode {
+  return executionMode === "openai_chat" ? "openai_chat" : "claude_cli";
+}
+
+export function getExecutionModeLabel(executionMode: ExecutionMode): string {
+  return executionMode === "openai_chat" ? "OpenAI Chat" : "Claude CLI";
+}
+
 export type ProfileResponse = {
   id: string;
   name: string;
-  provider: string;
+  provider: Provider;
+  execution_mode: ExecutionMode;
   model_name: string;
   base_url: string;
   system_prompt: string;
@@ -14,7 +37,8 @@ export type ProfileResponse = {
 
 export type CreateProfileInput = {
   name: string;
-  provider: string;
+  provider: Provider;
+  execution_mode: ExecutionMode;
   model_name: string;
   base_url: string;
   api_key: string;
@@ -22,7 +46,8 @@ export type CreateProfileInput = {
 
 export type UpdateProfileInput = {
   name: string;
-  provider: string;
+  provider: Provider;
+  execution_mode: ExecutionMode;
   model_name: string;
   base_url: string;
   api_key: string;

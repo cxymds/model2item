@@ -57,6 +57,7 @@ async fn creates_and_lists_profiles() -> Result<(), Box<dyn std::error::Error>> 
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: secret.to_string(),
@@ -64,6 +65,7 @@ async fn creates_and_lists_profiles() -> Result<(), Box<dyn std::error::Error>> 
         .await?;
 
     assert_eq!(created.provider, "openai");
+    assert_eq!(created.execution_mode, "openai_chat");
     assert_eq!(created.model_name, "gpt-5.4");
     assert_ne!(created.api_key_encrypted, secret);
     assert!(
@@ -107,6 +109,7 @@ async fn updates_profile_fields_and_secret() -> Result<(), Box<dyn std::error::E
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-1".to_string(),
@@ -119,6 +122,7 @@ async fn updates_profile_fields_and_secret() -> Result<(), Box<dyn std::error::E
             UpdateProfileInput {
                 name: "Claude Sonnet".to_string(),
                 provider: "anthropic".to_string(),
+                execution_mode: "claude_cli".to_string(),
                 model_name: "claude-sonnet-4".to_string(),
                 base_url: "https://api.anthropic.example.com".to_string(),
                 api_key: "secret-2".to_string(),
@@ -151,6 +155,7 @@ async fn keeps_existing_secret_when_updating_profile_without_new_api_key(
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-1".to_string(),
@@ -163,6 +168,7 @@ async fn keeps_existing_secret_when_updating_profile_without_new_api_key(
             UpdateProfileInput {
                 name: "GPT 5.4 updated".to_string(),
                 provider: "openai".to_string(),
+                execution_mode: "openai_chat".to_string(),
                 model_name: "gpt-5.4-mini".to_string(),
                 base_url: "https://api.example.com/v2".to_string(),
                 api_key: "".to_string(),
@@ -194,6 +200,7 @@ async fn deletes_profile_when_not_bound() -> Result<(), Box<dyn std::error::Erro
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-1".to_string(),
@@ -221,6 +228,7 @@ async fn rejects_deleting_profile_when_bound_to_window() -> Result<(), Box<dyn s
         .create_profile(CreateProfileInput {
             name: "GPT 5.4".to_string(),
             provider: "openai".to_string(),
+            execution_mode: "openai_chat".to_string(),
             model_name: "gpt-5.4".to_string(),
             base_url: "https://api.example.com/v1".to_string(),
             api_key: "secret-1".to_string(),
@@ -237,6 +245,69 @@ async fn rejects_deleting_profile_when_bound_to_window() -> Result<(), Box<dyn s
 
     let result = service.delete_profile(&created.id).await;
     assert!(matches!(result, Err(AppError::InvalidInput(_))));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn creates_profile_with_execution_mode_and_normalizes_provider(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool, secret_store);
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "OpenAI via chat".to_string(),
+            provider: "anthropic".to_string(),
+            execution_mode: "openai_chat".to_string(),
+            model_name: "gpt-5.4".to_string(),
+            base_url: "https://api.example.com/v1".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+
+    assert_eq!(created.execution_mode, "openai_chat");
+    assert_eq!(created.provider, "openai");
+    Ok(())
+}
+
+#[tokio::test]
+async fn updates_execution_mode_and_normalizes_provider() -> Result<(), Box<dyn std::error::Error>>
+{
+    let pool = support::create_test_pool().await?;
+    let secret_store = Arc::new(MemorySecretStore::default());
+    let service = ProfileService::with_secret_store(pool, secret_store);
+
+    let created = service
+        .create_profile(CreateProfileInput {
+            name: "Claude CLI".to_string(),
+            provider: "openai".to_string(),
+            execution_mode: "claude_cli".to_string(),
+            model_name: "claude-sonnet-4".to_string(),
+            base_url: "https://api.anthropic.example.com".to_string(),
+            api_key: "secret-1".to_string(),
+        })
+        .await?;
+    assert_eq!(created.execution_mode, "claude_cli");
+    assert_eq!(created.provider, "anthropic");
+
+    let updated = service
+        .update_profile(
+            &created.id,
+            UpdateProfileInput {
+                name: "OpenAI Chat".to_string(),
+                provider: "anthropic".to_string(),
+                execution_mode: "openai_chat".to_string(),
+                model_name: "gpt-5.4".to_string(),
+                base_url: "https://api.example.com/v1".to_string(),
+                api_key: "secret-2".to_string(),
+            },
+        )
+        .await?;
+
+    assert_eq!(updated.execution_mode, "openai_chat");
+    assert_eq!(updated.provider, "openai");
 
     Ok(())
 }

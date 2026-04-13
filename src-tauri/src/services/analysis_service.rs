@@ -17,8 +17,16 @@ use crate::{
 #[derive(Debug, Clone, Deserialize)]
 struct ProfileSnapshot {
     display_name: Option<String>,
+    execution_mode: Option<String>,
     provider: Option<String>,
     model_name: Option<String>,
+}
+
+fn execution_mode_label(execution_mode: &str) -> &'static str {
+    match execution_mode {
+        "openai_chat" => "OpenAI Chat",
+        _ => "Claude CLI",
+    }
 }
 
 pub fn build_comparison_summary(
@@ -53,11 +61,22 @@ pub fn build_comparison_summary(
             let parsed =
                 serde_json::from_str::<ProfileSnapshot>(&target.profile_snapshot_json).ok();
             let display_name = parsed.as_ref().and_then(|item| item.display_name.clone());
+            let execution_mode = parsed.as_ref().and_then(|item| item.execution_mode.clone());
             let provider = parsed.as_ref().and_then(|item| item.provider.clone());
             let model_name = parsed.as_ref().and_then(|item| item.model_name.clone());
 
-            let label = match (provider.as_ref(), model_name.as_ref()) {
-                (Some(p), Some(m)) => format!("{p} / {m}"),
+            let label = match (
+                execution_mode.as_deref(),
+                provider.as_ref(),
+                model_name.as_ref(),
+            ) {
+                (Some(mode), _, Some(model)) => {
+                    format!("{} / {model}", execution_mode_label(mode))
+                }
+                (Some(mode), Some(provider), None) => {
+                    format!("{} / {provider}", execution_mode_label(mode))
+                }
+                (None, Some(provider), Some(model)) => format!("{provider} / {model}"),
                 _ => display_name
                     .clone()
                     .unwrap_or_else(|| format!("Target {}", target.id)),
